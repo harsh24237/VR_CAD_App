@@ -13,6 +13,8 @@ namespace VRCAD.Core
         Cone,
         Prism,
         Torus,
+        Wedge,
+        Face,
         Custom
     }
 
@@ -43,9 +45,21 @@ namespace VRCAD.Core
         private Material selectedMaterial;
         private Material highlightMaterial;
 
+        [Header("Wireframe State")]
+        private GameObject wireframeChild;
+        private MeshFilter wireframeFilter;
+        private MeshRenderer wireframeRenderer;
+        private bool isWireframeMode = false;
+
+        [Header("Selection Cage Visual")]
+        private GameObject selectionCage;
+
+        public bool IsWireframeMode => isWireframeMode;
+
         public string ObjectId => objectId;
         public CADShapeType ShapeType { get => shapeType; set => shapeType = value; }
         public Vector3 Dimensions { get => dimensions; set => dimensions = value; }
+
         public MeshFilter MeshFilter => meshFilter ??= GetComponent<MeshFilter>();
         public MeshRenderer MeshRenderer => meshRenderer ??= GetComponent<MeshRenderer>();
         public MeshCollider MeshCollider => meshCollider ??= GetComponent<MeshCollider>();
@@ -55,13 +69,13 @@ namespace VRCAD.Core
         public bool IsSelected => isSelected;
         public int SelectedFaceIndex => selectedFaceIndex;
         public int SelectedVertexIndex => selectedVertexIndex;
-        public int SelectedEdgeIndex => selectedEdgeIndex;
+        public (int v1, int v2) SelectedEdge => (selectedEdgeIndex >= 0) ? (0, 1) : (-1, -1);
 
         private void Awake()
         {
             if (string.IsNullOrEmpty(objectId))
             {
-                objectId = "CAD_" + System.Guid.NewGuid().ToString().Substring(0, 8);
+                objectId = Guid.NewGuid().ToString("N");
             }
 
             meshFilter = GetComponent<MeshFilter>();
@@ -70,11 +84,11 @@ namespace VRCAD.Core
             grabInteractable = GetComponent<XRGrabInteractable>();
             rb = GetComponent<Rigidbody>();
 
-            SetupPhysicsAndGrabbing();
             CreateDefaultMaterials();
+            ConfigurePhysicsAndXR();
         }
 
-        private void SetupPhysicsAndGrabbing()
+        private void ConfigurePhysicsAndXR()
         {
             if (rb != null)
             {
@@ -132,6 +146,16 @@ namespace VRCAD.Core
                 MeshCollider.sharedMesh = newMesh;
                 MeshCollider.convex = true;
             }
+
+            if (isWireframeMode)
+            {
+                UpdateWireframeMesh();
+            }
+
+            if (isSelected)
+            {
+                UpdateSelectionCageBounds();
+            }
         }
 
         public void SetColor(Color color)
@@ -140,14 +164,195 @@ namespace VRCAD.Core
             {
                 defaultMaterial.color = color;
             }
-            if (meshRenderer != null && !isSelected)
+            if (meshRenderer != null)
             {
-                meshRenderer.material = defaultMaterial;
+                meshRenderer.material.color = color;
             }
+            if (wireframeRenderer != null && wireframeRenderer.material != null)
+            {
+                wireframeRenderer.material.color = color;
+            }
+        }
+
+        public void SetMaterialProperties(float roughness, float metallic)
+        {
+            float smoothness = 1f - Mathf.Clamp01(roughness);
+            if (defaultMaterial != null)
+            {
+                if (defaultMaterial.HasProperty("_Glossiness"))
+                    defaultMaterial.SetFloat("_Glossiness", smoothness);
+                if (defaultMaterial.HasProperty("_Metallic"))
+                    defaultMaterial.SetFloat("_Metallic", metallic);
+                if (defaultMaterial.HasProperty("_Smoothness"))
+                    defaultMaterial.SetFloat("_Smoothness", smoothness);
+            }
+            if (meshRenderer != null && meshRenderer.material != null)
+            {
+                if (meshRenderer.material.HasProperty("_Glossiness"))
+                    meshRenderer.material.SetFloat("_Glossiness", smoothness);
+                if (meshRenderer.material.HasProperty("_Metallic"))
+                    meshRenderer.material.SetFloat("_Metallic", metallic);
+                if (meshRenderer.material.HasProperty("_Smoothness"))
+                    meshRenderer.material.SetFloat("_Smoothness", smoothness);
+            }
+        }
+
+        public void SetOpacity(float opacity)
+        {
+            opacity = Mathf.Clamp01(opacity);
+            Color col = GetColor();
+            col.a = opacity;
+
+            if (defaultMaterial != null)
+            {
+                ConfigureMaterialTransparency(defaultMaterial, opacity);
+                defaultMaterial.color = col;
+            }
+            if (meshRenderer != null && meshRenderer.material != null)
+            {
+                ConfigureMaterialTransparency(meshRenderer.material, opacity);
+                meshRenderer.material.color = col;
+            }
+        }
+
+        private void ConfigureMaterialTransparency(Material mat, float opacity)
+        {
+            if (opacity < 0.99f)
+            {
+                if (mat.HasProperty("_Mode")) mat.SetFloat("_Mode", 3); // Transparent
+                mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+                mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+                mat.SetInt("_ZWrite", 0);
+                mat.DisableKeyword("_ALPHATEST_ON");
+                mat.EnableKeyword("_ALPHABLEND_ON");
+                mat.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+                mat.renderQueue = 3000;
+            }
+            else
+            {
+                if (mat.HasProperty("_Mode")) mat.SetFloat("_Mode", 0); // Opaque
+                mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.One);
+                mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.Zero);
+                mat.SetInt("_ZWrite", 1);
+                mat.DisableKeyword("_ALPHABLEND_ON");
+                mat.renderQueue = -1;
+            }
+        }
+
+        public void ApplyChromePreset()
+        {
+            Color chromeCol = new Color(0.96f, 0.97f, 1.0f, 1.0f);
+            SetColor(chromeCol);
+            SetMaterialProperties(0.02f, 1.0f); // 0.02 roughness (mirror glossiness) + 1.0 metallic
+
+            if (meshRenderer != null && meshRenderer.material != null)
+            {
+                Material mat = meshRenderer.material;
+                if (mat.HasProperty("_SpecularHighlights")) mat.SetFloat("_SpecularHighlights", 1f);
+                if (mat.HasProperty("_GlossyReflections")) mat.SetFloat("_GlossyReflections", 1f);
+            }
+        }
+
+        public void ResetMaterialAndEffects(Color baseColor)
+        {
+            SetColor(baseColor);
+            SetMaterialProperties(0.35f, 0.10f);
+            SetOpacity(1.0f);
+            SetWireframeMode(false);
+
+            if (meshRenderer != null && meshRenderer.material != null)
+            {
+                Material mat = meshRenderer.material;
+                if (mat.HasProperty("_SpecularHighlights")) mat.SetFloat("_SpecularHighlights", 1f);
+                if (mat.HasProperty("_GlossyReflections")) mat.SetFloat("_GlossyReflections", 1f);
+                mat.DisableKeyword("_EMISSION");
+                mat.SetColor("_EmissionColor", Color.black);
+            }
+        }
+
+        public void SetWireframeMode(bool enabled)
+        {
+            isWireframeMode = enabled;
+            if (enabled)
+            {
+                UpdateWireframeMesh();
+                if (wireframeChild != null) wireframeChild.SetActive(true);
+                if (meshRenderer != null) meshRenderer.enabled = false;
+            }
+            else
+            {
+                if (wireframeChild != null) wireframeChild.SetActive(false);
+                if (meshRenderer != null) meshRenderer.enabled = true;
+            }
+        }
+
+        public void UpdateWireframeMesh()
+        {
+            Mesh sourceMesh = MeshFilter.sharedMesh;
+            if (sourceMesh == null) return;
+
+            if (wireframeChild == null)
+            {
+                wireframeChild = new GameObject("CAD_Wireframe_Lines");
+                wireframeChild.transform.SetParent(transform, false);
+                wireframeChild.transform.localPosition = Vector3.zero;
+                wireframeChild.transform.localRotation = Quaternion.identity;
+                wireframeChild.transform.localScale = Vector3.one;
+
+                wireframeFilter = wireframeChild.AddComponent<MeshFilter>();
+                wireframeRenderer = wireframeChild.AddComponent<MeshRenderer>();
+
+                Material wireMat = new Material(Shader.Find("Unlit/Color") ?? Shader.Find("Standard"));
+                wireMat.color = new Color(0.00f, 0.88f, 1.0f, 1.0f); // Radiant CAD vector wireframe
+                wireframeRenderer.material = wireMat;
+                wireframeRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                wireframeRenderer.receiveShadows = false;
+            }
+
+            int[] triangles = sourceMesh.triangles;
+            Vector3[] vertices = sourceMesh.vertices;
+            HashSet<(int, int)> edges = new HashSet<(int, int)>();
+
+            for (int t = 0; t < triangles.Length; t += 3)
+            {
+                int i0 = triangles[t];
+                int i1 = triangles[t + 1];
+                int i2 = triangles[t + 2];
+
+                AddUniqueEdge(edges, i0, i1);
+                AddUniqueEdge(edges, i1, i2);
+                AddUniqueEdge(edges, i2, i0);
+            }
+
+            int[] lineIndices = new int[edges.Count * 2];
+            int idx = 0;
+            foreach (var edge in edges)
+            {
+                lineIndices[idx++] = edge.Item1;
+                lineIndices[idx++] = edge.Item2;
+            }
+
+            Mesh wireMesh = new Mesh
+            {
+                name = sourceMesh.name + "_WireframeMesh",
+                vertices = vertices
+            };
+            wireMesh.SetIndices(lineIndices, MeshTopology.Lines, 0);
+            wireMesh.RecalculateBounds();
+
+            wireframeFilter.sharedMesh = wireMesh;
+        }
+
+        private void AddUniqueEdge(HashSet<(int, int)> set, int a, int b)
+        {
+            if (a > b) { int tmp = a; a = b; b = tmp; }
+            set.Add((a, b));
         }
 
         public Color GetColor()
         {
+            if (meshRenderer != null && meshRenderer.material != null)
+                return meshRenderer.material.color;
             return defaultMaterial != null ? defaultMaterial.color : Color.white;
         }
 
@@ -161,12 +366,32 @@ namespace VRCAD.Core
             CADManagerHub.Instance?.OnMeshModified(this);
         }
 
+        public void SetPositionValue(int axis, float value)
+        {
+            Vector3 pos = transform.localPosition;
+            if (axis == 0) pos.x = value;
+            else if (axis == 1) pos.y = value;
+            else if (axis == 2) pos.z = value;
+            transform.localPosition = pos;
+            CADManagerHub.Instance?.OnMeshModified(this);
+        }
+
         public void AdjustRotation(int axis, float delta)
         {
             Vector3 euler = transform.localEulerAngles;
             if (axis == 0) euler.x += delta;
             else if (axis == 1) euler.y += delta;
             else if (axis == 2) euler.z += delta;
+            transform.localEulerAngles = euler;
+            CADManagerHub.Instance?.OnMeshModified(this);
+        }
+
+        public void SetRotationValue(int axis, float value)
+        {
+            Vector3 euler = transform.localEulerAngles;
+            if (axis == 0) euler.x = value;
+            else if (axis == 1) euler.y = value;
+            else if (axis == 2) euler.z = value;
             transform.localEulerAngles = euler;
             CADManagerHub.Instance?.OnMeshModified(this);
         }
@@ -194,13 +419,114 @@ namespace VRCAD.Core
             CADManagerHub.Instance?.OnMeshModified(this);
         }
 
+        public void SetScaleValue(int axis, float value)
+        {
+            Vector3 scale = transform.localScale;
+            if (axis == 0) scale.x = Mathf.Max(0.005f, value);
+            else if (axis == 1) scale.y = Mathf.Max(0.005f, value);
+            else if (axis == 2) scale.z = Mathf.Max(0.005f, value);
+            transform.localScale = scale;
+            dimensions = scale;
+            CADManagerHub.Instance?.OnMeshModified(this);
+        }
+
         public void SetSelected(bool selected)
         {
             isSelected = selected;
-            if (meshRenderer != null)
+
+            // Ensure no color-polluting emission is active on the shape's material
+            if (meshRenderer != null && meshRenderer.material != null)
             {
-                meshRenderer.material = isSelected ? selectedMaterial : defaultMaterial;
+                Material mat = meshRenderer.material;
+                mat.DisableKeyword("_EMISSION");
+                mat.SetColor("_EmissionColor", Color.black);
             }
+
+            UpdateSelectionVisual();
+        }
+
+        private void UpdateSelectionVisual()
+        {
+            if (isSelected)
+            {
+                if (selectionCage == null)
+                {
+                    selectionCage = CreateSelectionCage();
+                }
+                selectionCage.SetActive(true);
+                UpdateSelectionCageBounds();
+            }
+            else
+            {
+                if (selectionCage != null)
+                {
+                    selectionCage.SetActive(false);
+                }
+            }
+        }
+
+        private GameObject CreateSelectionCage()
+        {
+            GameObject cage = new GameObject("CAD_SelectionCage");
+            cage.transform.SetParent(transform, false);
+            cage.transform.localPosition = Vector3.zero;
+            cage.transform.localRotation = Quaternion.identity;
+            cage.transform.localScale = Vector3.one;
+
+            LineRenderer lr = cage.AddComponent<LineRenderer>();
+            lr.useWorldSpace = false;
+            lr.startWidth = 0.0035f;
+            lr.endWidth = 0.0035f;
+            lr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            lr.receiveShadows = false;
+
+            Material cageMat = new Material(Shader.Find("Unlit/Color") ?? Shader.Find("Standard"));
+            cageMat.color = new Color(0.00f, 0.85f, 1.00f, 0.95f); // Radiant CAD cyan bounding cage
+            lr.material = cageMat;
+
+            return cage;
+        }
+
+        public void UpdateSelectionCageBounds()
+        {
+            if (selectionCage == null) return;
+            Mesh m = MeshFilter.sharedMesh;
+            if (m == null) return;
+
+            LineRenderer lr = selectionCage.GetComponent<LineRenderer>();
+            if (lr == null) return;
+
+            Bounds b = m.bounds;
+            Vector3 min = b.min * 1.025f;
+            Vector3 max = b.max * 1.025f;
+
+            // 16 points tracing the 12 edges of a box
+            Vector3[] pts = new Vector3[]
+            {
+                new Vector3(min.x, min.y, min.z),
+                new Vector3(max.x, min.y, min.z),
+                new Vector3(max.x, max.y, min.z),
+                new Vector3(min.x, max.y, min.z),
+                new Vector3(min.x, min.y, min.z),
+
+                new Vector3(min.x, min.y, max.z),
+                new Vector3(max.x, min.y, max.z),
+                new Vector3(max.x, min.y, min.z),
+                new Vector3(max.x, min.y, max.z),
+
+                new Vector3(max.x, max.y, max.z),
+                new Vector3(max.x, max.y, min.z),
+                new Vector3(max.x, max.y, max.z),
+
+                new Vector3(min.x, max.y, max.z),
+                new Vector3(min.x, max.y, min.z),
+                new Vector3(min.x, max.y, max.z),
+
+                new Vector3(min.x, min.y, max.z)
+            };
+
+            lr.positionCount = pts.Length;
+            lr.SetPositions(pts);
         }
 
         public void SetSelectedFace(int faceIndex)

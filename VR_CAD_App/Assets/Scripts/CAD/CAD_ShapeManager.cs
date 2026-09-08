@@ -56,6 +56,24 @@ namespace VRCAD.Core
             Destroy(cadObject.gameObject);
         }
 
+        public void RegisterObject(CADObject obj)
+        {
+            if (obj != null && !registeredObjects.Contains(obj))
+            {
+                registeredObjects.Add(obj);
+                CADManagerHub.Instance?.OnShapeCreated(obj);
+            }
+        }
+
+        public void UnregisterObject(CADObject obj)
+        {
+            if (obj != null && registeredObjects.Contains(obj))
+            {
+                registeredObjects.Remove(obj);
+                CADManagerHub.Instance?.OnShapeDeleted(obj);
+            }
+        }
+
         public void ClearAll()
         {
             for (int i = registeredObjects.Count - 1; i >= 0; i--)
@@ -80,6 +98,8 @@ namespace VRCAD.Core
                 CADShapeType.Cone => CreateConeMesh(0.5f, 1f, 24),
                 CADShapeType.Prism => CreateTriangularPrismMesh(1f, 1f, 1f),
                 CADShapeType.Torus => CreateTorusMesh(0.5f, 0.15f, 24, 16),
+                CADShapeType.Wedge => CreateWedgeMesh(1f, 1f, 1f),
+                CADShapeType.Face => CreateFaceMesh(1f, 1f),
                 _ => CreateBoxMesh(1f, 1f, 1f)
             };
         }
@@ -473,6 +493,102 @@ namespace VRCAD.Core
             mesh.SetNormals(norms);
             mesh.SetUVs(0, uvs);
             mesh.SetTriangles(tris, 0);
+            mesh.RecalculateBounds();
+            return mesh;
+        }
+
+        public static Mesh CreateWedgeMesh(float width, float height, float depth)
+        {
+            Mesh mesh = new Mesh { name = "Procedural_Wedge" };
+            float halfW = width * 0.5f;
+            float halfH = height * 0.5f;
+            float halfD = depth * 0.5f;
+
+            // Wedge: a box with the top-front edge collapsed to form a ramp
+            Vector3 v0 = new Vector3(-halfW, -halfH, -halfD); // bottom-back-left
+            Vector3 v1 = new Vector3( halfW, -halfH, -halfD); // bottom-back-right
+            Vector3 v2 = new Vector3(-halfW, -halfH,  halfD); // bottom-front-left
+            Vector3 v3 = new Vector3( halfW, -halfH,  halfD); // bottom-front-right
+            Vector3 v4 = new Vector3(-halfW,  halfH, -halfD); // top-back-left
+            Vector3 v5 = new Vector3( halfW,  halfH, -halfD); // top-back-right
+
+            List<Vector3> verts = new List<Vector3>();
+            List<Vector3> norms = new List<Vector3>();
+            List<Vector2> uvs = new List<Vector2>();
+            List<int> tris = new List<int>();
+
+            void AddQuad(Vector3 a, Vector3 b, Vector3 c, Vector3 d)
+            {
+                Vector3 n = Vector3.Cross(b - a, c - a).normalized;
+                int start = verts.Count;
+                verts.AddRange(new[] { a, b, c, d });
+                norms.AddRange(new[] { n, n, n, n });
+                uvs.AddRange(new[] { new Vector2(0, 0), new Vector2(1, 0), new Vector2(1, 1), new Vector2(0, 1) });
+                tris.AddRange(new[] { start, start + 1, start + 2, start, start + 2, start + 3 });
+            }
+
+            void AddTri(Vector3 a, Vector3 b, Vector3 c)
+            {
+                Vector3 n = Vector3.Cross(b - a, c - a).normalized;
+                int start = verts.Count;
+                verts.AddRange(new[] { a, b, c });
+                norms.AddRange(new[] { n, n, n });
+                uvs.AddRange(new[] { new Vector2(0, 0), new Vector2(1, 0), new Vector2(0.5f, 1) });
+                tris.AddRange(new[] { start, start + 1, start + 2 });
+            }
+
+            // Bottom face
+            AddQuad(v2, v3, v1, v0);
+            // Back face
+            AddQuad(v0, v1, v5, v4);
+            // Slope face (top)
+            AddQuad(v4, v5, v3, v2);
+            // Left triangle
+            AddTri(v0, v4, v2);
+            // Right triangle
+            AddTri(v1, v3, v5);
+
+            mesh.SetVertices(verts);
+            mesh.SetNormals(norms);
+            mesh.SetUVs(0, uvs);
+            mesh.SetTriangles(tris, 0);
+            mesh.RecalculateBounds();
+            return mesh;
+        }
+
+        public static Mesh CreateFaceMesh(float width, float height)
+        {
+            Mesh mesh = new Mesh { name = "Procedural_Face" };
+            float halfW = width * 0.5f;
+            float halfH = height * 0.5f;
+
+            Vector3[] vertices = new Vector3[]
+            {
+                new Vector3(-halfW, -halfH, 0),
+                new Vector3( halfW, -halfH, 0),
+                new Vector3( halfW,  halfH, 0),
+                new Vector3(-halfW,  halfH, 0)
+            };
+
+            Vector3[] normals = new Vector3[]
+            {
+                Vector3.forward, Vector3.forward, Vector3.forward, Vector3.forward
+            };
+
+            Vector2[] uvs = new Vector2[]
+            {
+                new Vector2(0, 0), new Vector2(1, 0), new Vector2(1, 1), new Vector2(0, 1)
+            };
+
+            int[] triangles = new int[]
+            {
+                0, 1, 2, 0, 2, 3
+            };
+
+            mesh.vertices = vertices;
+            mesh.normals = normals;
+            mesh.uv = uvs;
+            mesh.triangles = triangles;
             mesh.RecalculateBounds();
             return mesh;
         }

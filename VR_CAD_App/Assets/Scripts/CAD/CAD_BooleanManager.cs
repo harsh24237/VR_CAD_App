@@ -34,10 +34,11 @@ namespace VRCAD.Core
                 targetObj.SetMesh(resultMesh);
                 CADManagerHub.Instance?.OnMeshModified(targetObj);
 
-                // If subtract or union, optionally remove or deactivate tool
+                // If subtract or union, deactivate tool instead of destroying so it can be restored on Undo
                 if (operation == BooleanOperation.Subtract || operation == BooleanOperation.Union)
                 {
-                    CADManagerHub.Instance?.ShapeManager?.DeleteObject(toolObj);
+                    toolObj.gameObject.SetActive(false);
+                    CADManagerHub.Instance?.ShapeManager?.UnregisterObject(toolObj);
                 }
 
                 return true;
@@ -115,10 +116,11 @@ namespace VRCAD.Core
             }
 
             // Perform robust spatial volumetric partition
-            return ExecuteVolumetricCSG(vertsA, trisA, transformedVertsB, trisB, boundsA, boundsB, op);
+            return ExecuteVolumetricCSG(meshA, vertsA, trisA, transformedVertsB, trisB, boundsA, boundsB, op);
         }
 
         private Mesh ExecuteVolumetricCSG(
+            Mesh meshA,
             Vector3[] vertsA, int[] trisA,
             Vector3[] vertsB, int[] trisB,
             Bounds boundsA, Bounds boundsB,
@@ -127,13 +129,14 @@ namespace VRCAD.Core
             List<Vector3> outVerts = new List<Vector3>();
             List<int> outTris = new List<int>();
 
+            Vector3 testDir = new Vector3(0.267f, 0.924f, 0.271f).normalized;
+
             // Approximate volumetric signed distance / containment classifier
             bool IsInsideB(Vector3 pt)
             {
                 if (!boundsB.Contains(pt)) return false;
-                // Fast ray casting parity test
                 int hits = 0;
-                Ray ray = new Ray(pt, Vector3.up);
+                Ray ray = new Ray(pt, testDir);
                 for (int t = 0; t < trisB.Length; t += 3)
                 {
                     if (RayIntersectsTriangle(ray, vertsB[trisB[t]], vertsB[trisB[t + 1]], vertsB[trisB[t + 2]], out float dist))
@@ -148,7 +151,7 @@ namespace VRCAD.Core
             {
                 if (!boundsA.Contains(pt)) return false;
                 int hits = 0;
-                Ray ray = new Ray(pt, Vector3.up);
+                Ray ray = new Ray(pt, testDir);
                 for (int t = 0; t < trisA.Length; t += 3)
                 {
                     if (RayIntersectsTriangle(ray, vertsA[trisA[t]], vertsA[trisA[t + 1]], vertsA[trisA[t + 2]], out float dist))
@@ -218,6 +221,13 @@ namespace VRCAD.Core
                         outTris.AddRange(new[] { start, start + 1, start + 2 });
                     }
                 }
+            }
+
+            if (outVerts.Count == 0)
+            {
+                if (op == BooleanOperation.Union)
+                    return CombineDisjointMeshes(vertsA, trisA, vertsB, trisB);
+                return UnityEngine.Object.Instantiate(meshA);
             }
 
             Mesh result = new Mesh { name = $"CSG_{op}_Result" };

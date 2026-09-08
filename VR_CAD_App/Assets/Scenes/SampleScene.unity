@@ -527,9 +527,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7f8e9d0a1b2c3d4e5f6a7b8c9d0e1f2a, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  spawnOffset: {x: 0, y: 1.2, z: 0.7}
+  spawnOffset: {x: 0, y: 1.45, z: 2.85}
   canvasSize: {x: 900, y: 600}
-  canvasScale: 0.001
+  canvasScale: 0.00085
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

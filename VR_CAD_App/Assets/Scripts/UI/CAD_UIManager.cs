@@ -9,51 +9,123 @@ using VRCAD.Core;
 
 namespace VRCAD.UI
 {
+    /// <summary>
+    /// Builds the complete VR CAD spatial UI matching the reference design:
+    /// - Clean top bar (logo, selection mode, status indicator, undo/redo/settings/close)
+    /// - 8 feature panels in a single horizontal row
+    /// - Refined COLOUR card matching reference design:
+    ///   * 12 color swatches (4x3 grid)
+    ///   * Slot select with < [☑] > controls
+    ///   * Sleek glowing Roughness and Metallic sliders with pill thumbs
+    ///   * TEXTURE & RENDER OPTIONS section
+    ///   * Brushed CHROME PRESET button
+    ///   * OPACITY slider
+    ///   * WIREFRAME VIEW toggle (vector wireframe view where only the wireframe is visible)
+    /// - Bottom action dock bar with quick-access buttons
+    /// - Interactive dimension editing via steppers and floating numpad
+    /// </summary>
     public class CAD_UIManager : MonoBehaviour
     {
-        [Header("Canvas Placement")]
-        [SerializeField] private Vector3 spawnOffset = new Vector3(0, 1.25f, 0.75f);
-        [SerializeField] private Vector2 totalCanvasSize = new Vector2(1380, 740);
-        [SerializeField] private float canvasScale = 0.0008f;
+        [Header("Canvas Placement (Positioned in background behind grid workplane)")]
+        [SerializeField] private Vector3 spawnOffset = new Vector3(0, 1.45f, 2.85f);
+        [SerializeField] private float canvasScale = 0.00085f;
 
         [Header("State Tracking")]
-        private bool uniformScaleEnabled = true;
-        private Color currentColor = Color.white;
-        private float redVal = 255f, greenVal = 255f, blueVal = 255f;
+        private Color currentColor = new Color(0.18f, 0.45f, 0.95f, 1.0f);
+        private float roughnessVal = 0.35f;
+        private float metallicVal = 0.1f;
+        private float opacityVal = 1.0f;
+        private bool isWireframeActive = false;
 
-        // Numeric text displays
+        // Sliders
+        private Slider roughnessSlider;
+        private Slider metallicSlider;
+        private Slider opacitySlider;
+        private TextMeshProUGUI roughnessValText;
+        private TextMeshProUGUI metallicValText;
+        private TextMeshProUGUI opacityValText;        // Wireframe toggle UI
+        private Image wireframeToggleBg;
+        private RectTransform wireframeToggleKnob;
+        private TextMeshProUGUI wireframeIconSolid;
+        private TextMeshProUGUI wireframeIconWire;
+
+        // Transform readout text references
         private TextMeshProUGUI posXText, posYText, posZText;
         private TextMeshProUGUI rotXText, rotYText, rotZText;
         private TextMeshProUGUI scaleXText, scaleYText, scaleZText;
-        private TextMeshProUGUI colRValText, colGValText, colBValText;
-        private Slider sliderR, sliderG, sliderB;
-        private Button uniformBtn;
 
-        // Bottom dock tab elements
-        private readonly List<TextMeshProUGUI> tabLabels = new List<TextMeshProUGUI>();
-        private GameObject tabUnderline;
-        private int activeTabIndex = 0;
+        // Status bar & Selection
+        private TextMeshProUGUI statusText;
+        private TextMeshProUGUI selectionModeText;
 
-        // Color Palette
-        private readonly Color colBgDark = new Color(0.06f, 0.08f, 0.12f, 0.96f);
-        private readonly Color colCardBg = new Color(0.09f, 0.12f, 0.18f, 0.94f);
-        private readonly Color colCardHeader = new Color(0.12f, 0.16f, 0.24f, 1.0f);
-        private readonly Color colInsetField = new Color(0.05f, 0.07f, 0.10f, 1.0f);
-        private readonly Color colBtnNormal = new Color(0.11f, 0.15f, 0.22f, 1.0f);
-        private readonly Color colBtnHover = new Color(0.18f, 0.24f, 0.35f, 1.0f);
-        private readonly Color colBtnBorder = new Color(0.18f, 0.25f, 0.36f, 1.0f);
+        // Snap state
+        private float activeGridSnap = 0.005f;
+        private float activeAngleSnap = 15f;
+        private readonly Dictionary<string, Button> gridSnapButtons = new Dictionary<string, Button>();
+        private readonly Dictionary<string, Button> angleSnapButtons = new Dictionary<string, Button>();
+        private readonly Dictionary<string, Button> axisLockButtons = new Dictionary<string, Button>();
+        private AxisConstraint currentAxisLock = AxisConstraint.None;
 
-        // Accent Colors
-        private readonly Color colGreenExport = new Color(0.13f, 0.58f, 0.25f, 1.0f);
-        private readonly Color colBlueLoad = new Color(0.13f, 0.38f, 0.85f, 1.0f);
-        private readonly Color colBlueClearAll = new Color(0.15f, 0.42f, 0.92f, 1.0f);
-        private readonly Color colRedClear = new Color(0.85f, 0.20f, 0.20f, 1.0f);
-        private readonly Color colCyanActive = new Color(0.00f, 0.70f, 1.00f, 1.0f);
-        private readonly Color colTextLight = new Color(0.92f, 0.95f, 0.98f, 1.0f);
-        private readonly Color colTextMuted = new Color(0.55f, 0.62f, 0.72f, 1.0f);
+        // Selection mode buttons
+        private readonly Dictionary<string, Button> selectionModeButtons = new Dictionary<string, Button>();
+        private SelectionMode currentSelectionMode = SelectionMode.Object;
 
+        // Color swatches tracking (12 colors)
+        private readonly List<Image> swatchOutlines = new List<Image>();
+        private int selectedSwatchIndex = 5; // Royal Blue by default
+
+        // Primitives active tracking
+        private Button activePrimitiveBtn;
+
+        // Numeric Dimension Numpad Popup
+        private GameObject numpadPanel;
+        private TextMeshProUGUI numpadTitleText;
+        private TextMeshProUGUI numpadDisplayText;
+        private string numpadCurrentInput = "0";
+        private int numpadTargetSection = 0; // 0: Pos, 1: Rot, 2: Scale
+        private int numpadTargetAxis = 0;    // 0: X, 1: Y, 2: Z
+
+        // ──────────────────────────────────────────────────
+        //  COLOR PALETTE — Sleek dark navy glassmorphism
+        // ──────────────────────────────────────────────────
+        private readonly Color colCardBg         = new Color(0.05f, 0.07f, 0.12f, 0.95f);
+        private readonly Color colInsetField     = new Color(0.03f, 0.04f, 0.08f, 1.0f);
+        private readonly Color colBtnNormal      = new Color(0.08f, 0.11f, 0.18f, 1.0f);
+        private readonly Color colBtnHover       = new Color(0.14f, 0.20f, 0.32f, 1.0f);
+        private readonly Color colBtnBorder      = new Color(0.12f, 0.18f, 0.28f, 1.0f);
+        private readonly Color colCyanActive     = new Color(0.00f, 0.70f, 0.98f, 1.0f);
+        private readonly Color colCyanGlow       = new Color(0.00f, 0.85f, 1.00f, 1.0f);
+        private readonly Color colSilverGlow     = new Color(0.85f, 0.88f, 0.94f, 1.0f);
+        private readonly Color colTextLight      = new Color(0.92f, 0.95f, 0.98f, 1.0f);
+        private readonly Color colTextMuted      = new Color(0.50f, 0.58f, 0.68f, 1.0f);
+        private readonly Color colTopBar         = new Color(0.04f, 0.06f, 0.10f, 0.97f);
+        private readonly Color colAxisRed        = new Color(0.90f, 0.20f, 0.20f, 1.0f);
+        private readonly Color colAxisGreen      = new Color(0.18f, 0.78f, 0.28f, 1.0f);
+        private readonly Color colAxisBlue       = new Color(0.20f, 0.45f, 0.95f, 1.0f);
+        private readonly Color colGreenExport    = new Color(0.12f, 0.58f, 0.25f, 1.0f);
+        private readonly Color colRedClear       = new Color(0.85f, 0.18f, 0.18f, 1.0f);
+        private readonly Color colBlueAction     = new Color(0.14f, 0.45f, 0.88f, 1.0f);
+        private readonly Color colDockBg         = new Color(0.04f, 0.06f, 0.10f, 0.97f);
+        private readonly Color colCardBorderGlow = new Color(0.00f, 0.50f, 0.80f, 0.25f);
+
+        // Layout constants — Carefully tuned with NO overlaps
+        private const float TOP_BAR_W = 1460f;
+        private const float TOP_BAR_H = 44f;
+        private const float TOP_BAR_Y = 240f;
+
+        private const float PANEL_ROW_GAP = 5f;
+        private const float CARDS_CENTER_Y = 40f;
+        private const float CARD_HEIGHT = 330f;
+
+        private const float DOCK_H = 54f;
+        private const float DOCK_Y = -162f;
+
+        // ──────────────────────────────────────────────────
+        //  LIFECYCLE
+        // ──────────────────────────────────────────────────
         private void Start()
         {
+            SetupEnvironment();
             BuildCompleteUI();
             SubscribeToEvents();
         }
@@ -63,572 +135,1206 @@ namespace VRCAD.UI
             UpdateLiveTransformReadouts();
         }
 
+        private void SetupEnvironment()
+        {
+            CAD_EnvironmentManager env = FindObjectOfType<CAD_EnvironmentManager>();
+            if (env == null)
+            {
+                GameObject envObj = new GameObject("CAD_EnvironmentSetup");
+                env = envObj.AddComponent<CAD_EnvironmentManager>();
+            }
+        }
+
+        // ──────────────────────────────────────────────────
+        //  MAIN UI BUILD
+        // ──────────────────────────────────────────────────
         private void BuildCompleteUI()
         {
-            // 1. Root Canvas
-            GameObject canvasObj = new GameObject("CAD_Pro_Spatial_Canvas");
+            GameObject existingCanvas = GameObject.Find("CAD_VR_Canvas");
+            if (existingCanvas != null)
+            {
+                Destroy(existingCanvas);
+            }
+
+            GameObject canvasObj = new GameObject("CAD_VR_Canvas");
             canvasObj.transform.position = spawnOffset;
-            canvasObj.transform.rotation = Quaternion.identity;
+            canvasObj.transform.rotation = Quaternion.Euler(4.0f, 0, 0);
 
             Canvas canvas = canvasObj.AddComponent<Canvas>();
             canvas.renderMode = RenderMode.WorldSpace;
+            if (canvas.worldCamera == null && Camera.main != null)
+            {
+                canvas.worldCamera = Camera.main;
+            }
 
             CanvasScaler scaler = canvasObj.AddComponent<CanvasScaler>();
             scaler.dynamicPixelsPerUnit = 10;
             scaler.referencePixelsPerUnit = 100;
 
-            canvasObj.AddComponent<GraphicRaycaster>();
-            canvasObj.AddComponent<TrackedDeviceGraphicRaycaster>();
+            // Non-blocking raycasters: ensure 3D physics colliders never occlude UI graphic raycasts
+            GraphicRaycaster gr = canvasObj.AddComponent<GraphicRaycaster>();
+            gr.blockingObjects = GraphicRaycaster.BlockingObjects.None;
+
+            TrackedDeviceGraphicRaycaster trackedRaycaster = canvasObj.AddComponent<TrackedDeviceGraphicRaycaster>();
+            trackedRaycaster.blockingMask = 0; // LayerMask 0 = Nothing blocks raycasts
 
             RectTransform canvasRect = canvasObj.GetComponent<RectTransform>();
-            canvasRect.sizeDelta = totalCanvasSize;
+            canvasRect.sizeDelta = new Vector2(TOP_BAR_W + 40, 560);
             canvasRect.localScale = Vector3.one * canvasScale;
 
-            // BoxCollider for Raycast & Poke
+            // Physics & Colliders: automatically attach BoxCollider matching RectTransform bounds.
+            // Z-center is offset slightly behind local Z = 0 so laser pointers always hit UI elements first.
+            float panelDepth = 16f;
             BoxCollider col = canvasObj.AddComponent<BoxCollider>();
-            col.size = new Vector3(totalCanvasSize.x, totalCanvasSize.y, 20f);
-            col.center = new Vector3(0, 0, 10f);
+            col.size = new Vector3(canvasRect.sizeDelta.x, canvasRect.sizeDelta.y, panelDepth);
+            col.center = new Vector3(0, 0, panelDepth * 0.5f + 1.0f);
 
-            // XRGrabInteractable so the canvas can be repositioned
+            // Floating Rigidbody: isKinematic = true and useGravity = false so the panel floats in mid-air
+            Rigidbody rb = canvasObj.AddComponent<Rigidbody>();
+            rb.useGravity = false;
+            rb.isKinematic = true;
+            rb.collisionDetectionMode = CollisionDetectionMode.ContinuousSpeculative;
+
+            // Grab Mechanics: XRGrabInteractable for smooth repositioning, rotation, and non-snapping dynamic attach
             XRGrabInteractable grab = canvasObj.AddComponent<XRGrabInteractable>();
-            grab.movementType = XRBaseInteractable.MovementType.VelocityTracking;
+            grab.movementType = XRBaseInteractable.MovementType.Instantaneous;
             grab.throwOnDetach = false;
-            Rigidbody rb = canvasObj.GetComponent<Rigidbody>();
-            if (rb != null)
-            {
-                rb.useGravity = false;
-                rb.isKinematic = true;
-            }
+            grab.retainTransformParent = true;
+            grab.useDynamicAttach = true;
 
-            // 2. Build Top Floating Cards Row
-            BuildTopCardsRow(canvasObj.transform);
+            // Zoom Mechanics (Distance/Scale): attach CAD_UIPanelManipulator to read thumbstick up/down
+            CAD_UIPanelManipulator zoomManipulator = canvasObj.AddComponent<CAD_UIPanelManipulator>();
+            grab.AddSingleGrabTransformer(zoomManipulator);
 
-            // 3. Build Bottom Main Dock
+            BuildTopBar(canvasObj.transform);
+            BuildPanelsRow(canvasObj.transform);
             BuildBottomDock(canvasObj.transform);
+            BuildNumpadModal(canvasObj.transform);
         }
 
-        #region Top Cards Row (6 Panels)
+        // ════════════════════════════════════════════════════════
+        //  TOP BAR (Clean, non-colliding header)
+        // ════════════════════════════════════════════════════════
 
-        private void BuildTopCardsRow(Transform parent)
+        #region Top Bar
+
+        private void BuildTopBar(Transform parent)
         {
-            float topY = 160f;
-            float cardHeight = 330f;
+            GameObject bar = CreateUIPanel("TopBar", parent, new Vector2(0, TOP_BAR_Y), new Vector2(TOP_BAR_W, TOP_BAR_H), colTopBar);
 
-            // Card 1: TOOLS (x: -560, w: 140)
-            BuildToolsCard(parent, new Vector2(-570, topY), new Vector2(150, cardHeight));
+            // Glowing bottom border
+            CreateUIPanel("TopBarGlow", bar.transform, new Vector2(0, -TOP_BAR_H * 0.5f + 1), new Vector2(TOP_BAR_W, 2), colCardBorderGlow);
 
-            // Card 2: COLOUR (x: -370, w: 230)
-            BuildColourCard(parent, new Vector2(-370, topY), new Vector2(230, cardHeight));
+            // Brand / Logo matching reference screenshot: [☑] VR CAD 3D MODELING
+            GameObject checkIcon = CreateUIPanel("LogoCheck", bar.transform, new Vector2(-TOP_BAR_W * 0.5f + 25, 0), new Vector2(22, 22), colBtnNormal);
+            CreateTMPText("CheckMark", checkIcon.transform, "☑", 15, TextAlignmentOptions.Center, colCyanActive, Vector2.zero, new Vector2(22, 22));
 
-            // Card 3: TEXTURE (x: -130, w: 230)
-            BuildTextureCard(parent, new Vector2(-130, topY), new Vector2(230, cardHeight));
+            CreateTMPText("LogoText", bar.transform, "<b>VR CAD</b>", 16, TextAlignmentOptions.Left, colTextLight, new Vector2(-TOP_BAR_W * 0.5f + 85, 5), new Vector2(90, 20));
+            CreateTMPText("LogoSub", bar.transform, "<size=8><b>3D MODELING</b></size>", 8, TextAlignmentOptions.Left, colTextMuted, new Vector2(-TOP_BAR_W * 0.5f + 85, -9), new Vector2(90, 14));
 
-            // Card 4: SCALE (x: 100, w: 210)
-            BuildScaleCard(parent, new Vector2(100, topY), new Vector2(210, cardHeight));
+            // Selection Mode Indicator Pill
+            float pillX = -60f;
+            GameObject pill = CreateUIPanel("SelectionPill", bar.transform, new Vector2(pillX, 0), new Vector2(190, 28), colBtnNormal);
+            CreateTMPText("PillLabel", pill.transform, "<size=10>Mode :</size>", 10, TextAlignmentOptions.Left, colTextMuted, new Vector2(-45, 0), new Vector2(50, 24));
+            selectionModeText = CreateTMPText("PillValue", pill.transform, "<b>Object</b>", 11, TextAlignmentOptions.Left, colCyanActive, new Vector2(10, 0), new Vector2(65, 24));
+            CreateTMPText("PillChevron", pill.transform, "▾", 10, TextAlignmentOptions.Right, colTextMuted, new Vector2(75, 0), new Vector2(16, 24));
 
-            // Card 5: ROTATE (x: 320, w: 210)
-            BuildRotateCard(parent, new Vector2(320, topY), new Vector2(210, cardHeight));
+            // Status Indicator Pill
+            float statusX = 140f;
+            GameObject statusPill = CreateUIPanel("StatusPill", bar.transform, new Vector2(statusX, 0), new Vector2(150, 28), new Color(0.06f, 0.09f, 0.14f, 0.85f));
+            CreateTMPText("StatusDot", statusPill.transform, "●", 9, TextAlignmentOptions.Center, new Color(0.2f, 0.9f, 0.35f, 1f), new Vector2(-60, 0), new Vector2(16, 24));
+            statusText = CreateTMPText("StatusText", statusPill.transform, "<size=11>Ready</size>", 11, TextAlignmentOptions.Left, colTextLight, new Vector2(10, 0), new Vector2(110, 24));
 
-            // Card 6: POSITION (x: 540, w: 210)
-            BuildPositionCard(parent, new Vector2(540, topY), new Vector2(210, cardHeight));
+            // Right Action Buttons: Undo, Redo, Settings, Close
+            float rx = TOP_BAR_W * 0.5f - 25;
+            CreateTopBarBtn("Btn_Close", bar.transform, new Vector2(rx, 0), "✕", colRedClear, () => CADManagerHub.Instance?.EmitStatus("CAD Session Running"));
+            CreateTopBarBtn("Btn_Settings", bar.transform, new Vector2(rx - 38, 0), "⚙", colTextMuted, () => CADManagerHub.Instance?.EmitStatus("Settings"));
+            CreateTopBarBtn("Btn_Redo", bar.transform, new Vector2(rx - 76, 0), "↷", colTextMuted, () => CADManagerHub.Instance?.Redo());
+            CreateTopBarBtn("Btn_Undo", bar.transform, new Vector2(rx - 114, 0), "↶", colTextMuted, () => CADManagerHub.Instance?.Undo());
         }
 
-        private void BuildToolsCard(Transform parent, Vector2 pos, Vector2 size)
+        private void CreateTopBarBtn(string name, Transform parent, Vector2 pos, string icon, Color iconColor, Action onClick)
         {
-            GameObject card = CreateCardPanel("Card_Tools", parent, pos, size, "❖ TOOLS");
+            GameObject obj = new GameObject(name);
+            obj.transform.SetParent(parent, false);
+            RectTransform rect = obj.AddComponent<RectTransform>();
+            rect.anchoredPosition = pos;
+            rect.sizeDelta = new Vector2(30, 28);
 
-            // Export Button (Green)
-            CreateColoredButton("Btn_Export", card.transform, new Vector2(0, 60), new Vector2(120, 65), "<b>⇪ EXPORT</b>", colGreenExport, () =>
-            {
-                CADManagerHub.Instance?.ExportSelectedSTL();
-            });
+            Image img = obj.AddComponent<Image>();
+            img.color = Color.clear;
 
-            // Load Button (Blue)
-            CreateColoredButton("Btn_Load", card.transform, new Vector2(0, -15), new Vector2(120, 65), "<b>📁 LOAD</b>", colBlueLoad, () =>
-            {
-                CADManagerHub.Instance?.CreatePrimitive(CADShapeType.Box);
-            });
+            Button btn = obj.AddComponent<Button>();
+            ColorBlock cb = btn.colors;
+            cb.normalColor = Color.clear;
+            cb.highlightedColor = new Color(1, 1, 1, 0.08f);
+            cb.pressedColor = colCyanActive * 0.4f;
+            btn.colors = cb;
+            if (onClick != null) btn.onClick.AddListener(() => onClick());
 
-            // Undo / Redo Row
-            CreateButtonWithLabel("Btn_Undo", card.transform, new Vector2(-32, -90), new Vector2(56, 55), "<b>↺</b>\n<size=10>UNDO</size>", () =>
-            {
-                CADManagerHub.Instance?.EmitStatus("Undo action executed");
-            });
-
-            CreateButtonWithLabel("Btn_Redo", card.transform, new Vector2(32, -90), new Vector2(56, 55), "<b>↻</b>\n<size=10>REDO</size>", () =>
-            {
-                CADManagerHub.Instance?.EmitStatus("Redo action executed");
-            });
+            CreateTMPText("Icon", obj.transform, icon, 14, TextAlignmentOptions.Center, iconColor, Vector2.zero, new Vector2(30, 28));
         }
 
+        #endregion
+
+        // ════════════════════════════════════════════════════════
+        //  PANELS ROW — All 8 panels in one single horizontal strip
+        // ════════════════════════════════════════════════════════
+
+        #region Panels Row
+
+        private void BuildPanelsRow(Transform parent)
+        {
+            // Panel widths: COLOUR panel is 176px wide to comfortably host the 4x3 swatches and render options
+            float[] widths = { 176f, 160f, 260f, 190f, 190f, 120f, 150f, 175f };
+
+            float totalW = 0;
+            for (int i = 0; i < widths.Length; i++) totalW += widths[i];
+            totalW += (widths.Length - 1) * PANEL_ROW_GAP;
+
+            float x = -totalW * 0.5f;
+
+            for (int i = 0; i < widths.Length; i++)
+            {
+                float cx = x + widths[i] * 0.5f;
+                Vector2 pos = new Vector2(cx, CARDS_CENTER_Y);
+                Vector2 size = new Vector2(widths[i], CARD_HEIGHT);
+
+                switch (i)
+                {
+                    case 0: BuildColourCard(parent, pos, size); break;
+                    case 1: BuildCreateCard(parent, pos, size); break;
+                    case 2: BuildTransformCard(parent, pos, size); break;
+                    case 3: BuildSnapCard(parent, pos, size); break;
+                    case 4: BuildOperationsCard(parent, pos, size); break;
+                    case 5: BuildSelectionCard(parent, pos, size); break;
+                    case 6: BuildUtilityCard(parent, pos, size); break;
+                    case 7: BuildFileCard(parent, pos, size); break;
+                }
+
+                x += widths[i] + PANEL_ROW_GAP;
+            }
+        }
+
+        // ─── 1. REFINED COLOUR CARD (Exact match to target design) ───
         private void BuildColourCard(Transform parent, Vector2 pos, Vector2 size)
         {
-            GameObject card = CreateCardPanel("Card_Colour", parent, pos, size, "🎨 COLOUR");
+            GameObject card = CreateCardPanel("Card_Colour", parent, pos, size, "• COLOUR", true);
 
-            // R Slider Row
-            sliderR = CreateColorSliderRow(card.transform, "X", new Color(0.95f, 0.25f, 0.25f, 1f), new Vector2(0, 75), out colRValText, val =>
-            {
-                redVal = val;
-                ApplyColorUpdate();
-            });
-
-            // G Slider Row
-            sliderG = CreateColorSliderRow(card.transform, "Y", new Color(0.25f, 0.85f, 0.35f, 1f), new Vector2(0, 25), out colGValText, val =>
-            {
-                greenVal = val;
-                ApplyColorUpdate();
-            });
-
-            // B Slider Row
-            sliderB = CreateColorSliderRow(card.transform, "Z", new Color(0.25f, 0.45f, 0.95f, 1f), new Vector2(0, -25), out colBValText, val =>
-            {
-                blueVal = val;
-                ApplyColorUpdate();
-            });
-
-            // Preset Label
-            CreateTMPText("PresetLabel", card.transform, "<size=11><color=#8899aa>Preset</color></size>", 12, TextAlignmentOptions.Left, colTextMuted, new Vector2(-80, -65), new Vector2(60, 20));
-
-            // Preset Swatches Row
-            Color[] presets = new[]
-            {
-                Color.white,
-                new Color(0.6f, 0.6f, 0.6f),
-                new Color(0.2f, 0.2f, 0.2f),
-                new Color(0.9f, 0.2f, 0.2f),
-                new Color(0.2f, 0.8f, 0.3f),
-                new Color(0.2f, 0.4f, 0.9f)
+            // 12 Refined Color Presets (4 cols × 3 rows) matching Image 2
+            Color[] presets = {
+                // Row 1: Red, Orange, Yellow, Green
+                new Color(0.92f, 0.20f, 0.20f),
+                new Color(0.98f, 0.52f, 0.05f),
+                new Color(0.98f, 0.85f, 0.12f),
+                new Color(0.18f, 0.78f, 0.32f),
+                // Row 2: Sky Cyan, Royal Blue, Pure White, Silver Gray
+                new Color(0.00f, 0.75f, 0.95f),
+                new Color(0.18f, 0.45f, 0.95f),
+                new Color(1.00f, 1.00f, 1.00f),
+                new Color(0.82f, 0.84f, 0.88f),
+                // Row 3: Lime, Teal/Mint, Purple, Magenta
+                new Color(0.50f, 0.88f, 0.22f),
+                new Color(0.18f, 0.75f, 0.65f),
+                new Color(0.65f, 0.28f, 0.88f),
+                new Color(0.88f, 0.28f, 0.75f),
             };
 
+            float swW = 34f;
+            float swH = 24f;
+            float swGap = 4f;
+            float totalSwW = 4 * swW + 3 * swGap;
+            float swStartX = -totalSwW * 0.5f + swW * 0.5f;
+
+            swatchOutlines.Clear();
             for (int i = 0; i < presets.Length; i++)
             {
+                int idx = i;
+                int row = i / 4;
+                int col = i % 4;
+                float sx = swStartX + col * (swW + swGap);
+                float sy = 118f - row * (swH + swGap);
+
                 Color c = presets[i];
-                float px = -85 + i * 26;
-                CreateSwatchButton($"Swatch_{i}", card.transform, new Vector2(px, -90), new Vector2(22, 22), c, () =>
+                GameObject swObj = CreateSwatchButton($"Swatch_{i}", card.transform, new Vector2(sx, sy), new Vector2(swW, swH), c, (i == selectedSwatchIndex), () =>
                 {
+                    selectedSwatchIndex = idx;
                     SetColorFromPreset(c);
+                    UpdateSwatchOutlines();
+                });
+
+                Image outline = swObj.transform.Find("Outline")?.GetComponent<Image>();
+                if (outline != null) swatchOutlines.Add(outline);
+            }
+
+            // ─── Slot Select Row: < [☑ SLOT SELECT] > ───
+            float slotY = 32f;
+            CreateMaterialSlotButton("SlotPrev", card.transform, new Vector2(-46, slotY), "<", new Color(0.15f, 0.35f, 0.65f), () => CADManagerHub.Instance?.EmitStatus("Prev Material Slot"));
+
+            // Center: Checkbox with SLOT SELECT label
+            GameObject slotCenter = CreateUIPanel("SlotCenter", card.transform, new Vector2(0, slotY), new Vector2(54, 28), new Color(0.06f, 0.08f, 0.14f, 1f));
+            CreateUIPanel("SlotBdr", slotCenter.transform, Vector2.zero, new Vector2(54, 28), colBtnBorder).transform.SetAsFirstSibling();
+            GameObject checkIcon = CreateUIPanel("Chk", slotCenter.transform, new Vector2(0, 5), new Vector2(16, 14), colBtnNormal);
+            CreateTMPText("ChkMark", checkIcon.transform, "☑", 11, TextAlignmentOptions.Center, colCyanActive, Vector2.zero, new Vector2(16, 14));
+            CreateTMPText("SlotLbl", slotCenter.transform, "<size=7><b>SLOT SELECT</b></size>", 7, TextAlignmentOptions.Center, colTextMuted, new Vector2(0, -8), new Vector2(54, 10));
+
+            CreateMaterialSlotButton("SlotNext", card.transform, new Vector2(46, slotY), ">", new Color(0.45f, 0.35f, 0.25f), () => CADManagerHub.Instance?.EmitStatus("Next Material Slot"));
+
+            // ─── Sliders: Roughness & Metallic with sleek glowing pill handles ───
+            CreateGlowingSlider(card.transform, "Roughness", roughnessVal, new Vector2(0, -4), size.x - 20f, colCyanGlow, (val) =>
+            {
+                roughnessVal = val;
+                CADManagerHub.Instance?.SetSelectedMaterialProperties(roughnessVal, metallicVal);
+            }, out roughnessSlider, out roughnessValText);
+
+            CreateGlowingSlider(card.transform, "Metallic", metallicVal, new Vector2(0, -29), size.x - 20f, colSilverGlow, (val) =>
+            {
+                metallicVal = val;
+                CADManagerHub.Instance?.SetSelectedMaterialProperties(roughnessVal, metallicVal);
+            }, out metallicSlider, out metallicValText);
+
+            // ─── TEXTURE & RENDER OPTIONS Section ───
+            CreateUIPanel("SepRender", card.transform, new Vector2(0, -48), new Vector2(size.x - 14, 1), new Color(0.12f, 0.18f, 0.28f, 0.6f));
+            CreateTMPText("RenderHdr", card.transform, "<size=8.5><b>• TEXTURE & RENDER OPTIONS</b></size>", 8.5f, TextAlignmentOptions.Left, colTextLight, new Vector2(-size.x * 0.5f + 12 + (size.x - 24) * 0.5f, -59), new Vector2(size.x - 24, 16));
+
+            // Brushed CHROME PRESET Button
+            CreateChromePresetButton(card.transform, new Vector2(0, -75), new Vector2(size.x - 22, 21));
+
+            // RESET TEXTURES & EFFECTS Options Button
+            CreateResetOptionsButton(card.transform, new Vector2(0, -98), new Vector2(size.x - 22, 21));
+
+            // OPACITY Slider
+            CreateGlowingSlider(card.transform, "OPACITY", opacityVal, new Vector2(0, -121), size.x - 20f, colCyanGlow, (val) =>
+            {
+                opacityVal = val;
+                CADManagerHub.Instance?.SetSelectedOpacity(opacityVal);
+            }, out opacitySlider, out opacityValText);
+
+            // WIREFRAME VIEW Toggle with Icons
+            BuildWireframeToggleRow(card.transform, new Vector2(0, -145), size.x - 20f);
+        }
+
+        private void CreateMaterialSlotButton(string name, Transform parent, Vector2 pos, string arrow, Color slotPreviewColor, Action onClick)
+        {
+            GameObject obj = new GameObject(name);
+            obj.transform.SetParent(parent, false);
+            RectTransform rect = obj.AddComponent<RectTransform>();
+            rect.anchoredPosition = pos;
+            rect.sizeDelta = new Vector2(28, 26);
+
+            Image img = obj.AddComponent<Image>();
+            img.color = slotPreviewColor * 0.7f;
+
+            Button btn = obj.AddComponent<Button>();
+            ColorBlock cb = btn.colors;
+            cb.normalColor = slotPreviewColor * 0.7f;
+            cb.highlightedColor = slotPreviewColor;
+            cb.pressedColor = colCyanActive;
+            btn.colors = cb;
+            if (onClick != null) btn.onClick.AddListener(() => onClick());
+
+            // Dark overlay + arrow
+            GameObject overlay = CreateUIPanel("Ovl", obj.transform, Vector2.zero, new Vector2(28, 26), new Color(0, 0, 0, 0.45f));
+            CreateTMPText("Arr", overlay.transform, $"<b>{arrow}</b>", 11, TextAlignmentOptions.Center, colTextLight, Vector2.zero, new Vector2(28, 26));
+        }
+
+        private void CreateChromePresetButton(Transform parent, Vector2 pos, Vector2 size)
+        {
+            GameObject btnObj = new GameObject("Btn_ChromePreset");
+            btnObj.transform.SetParent(parent, false);
+            RectTransform rect = btnObj.AddComponent<RectTransform>();
+            rect.anchoredPosition = pos;
+            rect.sizeDelta = size;
+
+            // Brushed silver metallic look
+            Image img = btnObj.AddComponent<Image>();
+            img.color = new Color(0.78f, 0.82f, 0.88f, 1f);
+
+            // Specular top highlight line
+            CreateUIPanel("Highlight", btnObj.transform, new Vector2(0, size.y * 0.5f - 1), new Vector2(size.x, 2), new Color(1f, 1f, 1f, 0.75f));
+            // Shadow bottom line
+            CreateUIPanel("Shadow", btnObj.transform, new Vector2(0, -size.y * 0.5f + 1), new Vector2(size.x, 2), new Color(0.35f, 0.38f, 0.45f, 1f));
+
+            Button btn = btnObj.AddComponent<Button>();
+            ColorBlock cb = btn.colors;
+            cb.normalColor = new Color(0.78f, 0.82f, 0.88f, 1f);
+            cb.highlightedColor = new Color(0.92f, 0.95f, 1.0f, 1f);
+            cb.pressedColor = new Color(0.65f, 0.70f, 0.78f, 1f);
+            btn.colors = cb;
+
+            btn.onClick.AddListener(() =>
+            {
+                CADManagerHub.Instance?.ApplyChromePresetToSelection();
+                if (roughnessSlider != null) roughnessSlider.value = 0.02f;
+                if (metallicSlider != null) metallicSlider.value = 1.0f;
+                if (roughnessValText != null) roughnessValText.text = "0.02";
+                if (metallicValText != null) metallicValText.text = "1.00";
+            });
+
+            CreateTMPText("Lbl", btnObj.transform, "<b>CHROME PRESET</b>", 9.5f, TextAlignmentOptions.Center, new Color(0.08f, 0.10f, 0.15f, 1f), Vector2.zero, size);
+        }
+
+        private void CreateResetOptionsButton(Transform parent, Vector2 pos, Vector2 size)
+        {
+            GameObject btnObj = new GameObject("Btn_ResetOptions");
+            btnObj.transform.SetParent(parent, false);
+            RectTransform rect = btnObj.AddComponent<RectTransform>();
+            rect.anchoredPosition = pos;
+            rect.sizeDelta = size;
+
+            // Deep navy sleek glassmorphic panel
+            Image img = btnObj.AddComponent<Image>();
+            img.color = new Color(0.08f, 0.12f, 0.20f, 1f);
+
+            // Subtle cyan border
+            CreateUIPanel("Bdr", btnObj.transform, Vector2.zero, size, new Color(0.00f, 0.65f, 0.95f, 0.50f)).transform.SetAsFirstSibling();
+
+            // Specular top highlight line
+            CreateUIPanel("TopHighlight", btnObj.transform, new Vector2(0, size.y * 0.5f - 1), new Vector2(size.x - 2, 1.5f), new Color(0.00f, 0.85f, 1.0f, 0.40f));
+
+            Button btn = btnObj.AddComponent<Button>();
+            ColorBlock cb = btn.colors;
+            cb.normalColor = new Color(0.08f, 0.12f, 0.20f, 1f);
+            cb.highlightedColor = new Color(0.14f, 0.22f, 0.35f, 1f);
+            cb.pressedColor = new Color(0.00f, 0.50f, 0.85f, 1f);
+            btn.colors = cb;
+
+            btn.onClick.AddListener(() =>
+            {
+                CADManagerHub.Instance?.ResetSelectedMaterialAndEffects(currentColor);
+
+                roughnessVal = 0.35f;
+                if (roughnessSlider != null) roughnessSlider.value = 0.35f;
+                if (roughnessValText != null) roughnessValText.text = "0.35";
+
+                metallicVal = 0.10f;
+                if (metallicSlider != null) metallicSlider.value = 0.10f;
+                if (metallicValText != null) metallicValText.text = "0.10";
+
+                opacityVal = 1.0f;
+                if (opacitySlider != null) opacitySlider.value = 1.0f;
+                if (opacityValText != null) opacityValText.text = "1.00";
+
+                isWireframeActive = false;
+                UpdateWireframeToggleVisual();
+            });
+
+            CreateTMPText("Lbl", btnObj.transform, "<b>↺ RESET OPTIONS</b>", 9.0f, TextAlignmentOptions.Center, new Color(0.85f, 0.94f, 1.0f, 1f), Vector2.zero, size);
+        }
+
+        private void BuildWireframeToggleRow(Transform parent, Vector2 pos, float width)
+        {
+            GameObject row = new GameObject("WireframeRow");
+            row.transform.SetParent(parent, false);
+            RectTransform rect = row.AddComponent<RectTransform>();
+            rect.anchoredPosition = pos;
+            rect.sizeDelta = new Vector2(width, 22);
+
+            CreateTMPText("Lbl", row.transform, "<b>WIREFRAME VIEW</b>", 9, TextAlignmentOptions.Left, colTextLight, new Vector2(-width * 0.5f + 45, 0), new Vector2(90, 18));
+
+            // Switch Toggle Button: [  ○ ]
+            GameObject switchObj = new GameObject("SwitchToggle");
+            switchObj.transform.SetParent(row.transform, false);
+            RectTransform swRect = switchObj.AddComponent<RectTransform>();
+            swRect.anchoredPosition = new Vector2(15, 0);
+            swRect.sizeDelta = new Vector2(34, 16);
+
+            wireframeToggleBg = switchObj.AddComponent<Image>();
+            wireframeToggleBg.sprite = GetCapsuleSprite();
+            wireframeToggleBg.type = Image.Type.Sliced;
+            wireframeToggleBg.color = colBtnNormal;
+
+            Button switchBtn = switchObj.AddComponent<Button>();
+
+            // Circular Knob
+            GameObject knob = CreateUIPanel("Knob", switchObj.transform, new Vector2(-8, 0), new Vector2(12, 12), Color.white);
+            Image knobImg = knob.GetComponent<Image>();
+            knobImg.sprite = GetCircleSprite();
+            wireframeToggleKnob = knob.GetComponent<RectTransform>();
+
+            // Icons on right: Solid Sphere vs Wireframe Sphere
+            wireframeIconSolid = CreateTMPText("IconSolid", row.transform, "●", 12, TextAlignmentOptions.Center, colTextLight, new Vector2(width * 0.5f - 24, 0), new Vector2(16, 16));
+            wireframeIconWire = CreateTMPText("IconWire", row.transform, "⬡", 12, TextAlignmentOptions.Center, colTextMuted, new Vector2(width * 0.5f - 8, 0), new Vector2(16, 16));
+
+            switchBtn.onClick.AddListener(() =>
+            {
+                isWireframeActive = !isWireframeActive;
+                UpdateWireframeToggleVisual();
+                CADManagerHub.Instance?.SetWireframeMode(isWireframeActive);
+            });
+        }
+
+        private void UpdateWireframeToggleVisual()
+        {
+            if (wireframeToggleBg != null)
+                wireframeToggleBg.color = isWireframeActive ? colCyanActive : colBtnNormal;
+
+            if (wireframeToggleKnob != null)
+                wireframeToggleKnob.anchoredPosition = new Vector2(isWireframeActive ? 8 : -8, 0);
+
+            if (wireframeIconSolid != null)
+                wireframeIconSolid.color = isWireframeActive ? colTextMuted : colTextLight;
+
+            if (wireframeIconWire != null)
+                wireframeIconWire.color = isWireframeActive ? colCyanActive : colTextMuted;
+        }
+
+        private static Sprite circleSprite;
+        private static Sprite capsuleSprite;
+
+        public static Sprite GetCircleSprite()
+        {
+            if (circleSprite != null) return circleSprite;
+
+            int size = 64;
+            Texture2D tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+            tex.name = "CAD_CircleSprite";
+            tex.wrapMode = TextureWrapMode.Clamp;
+            tex.filterMode = FilterMode.Bilinear;
+
+            float center = (size - 1) * 0.5f;
+            float radius = center - 1.5f;
+            Color[] cols = new Color[size * size];
+
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    float dist = Vector2.Distance(new Vector2(x, y), new Vector2(center, center));
+                    float alpha = Mathf.Clamp01(radius + 1.2f - dist);
+                    cols[y * size + x] = new Color(1f, 1f, 1f, alpha);
+                }
+            }
+
+            tex.SetPixels(cols);
+            tex.Apply();
+            circleSprite = Sprite.Create(tex, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f));
+            return circleSprite;
+        }
+
+        public static Sprite GetCapsuleSprite()
+        {
+            if (capsuleSprite != null) return capsuleSprite;
+
+            int w = 64;
+            int h = 32;
+            Texture2D tex = new Texture2D(w, h, TextureFormat.RGBA32, false);
+            tex.name = "CAD_CapsuleSprite";
+            tex.wrapMode = TextureWrapMode.Clamp;
+            tex.filterMode = FilterMode.Bilinear;
+
+            float r = (h - 1) * 0.5f - 1.5f;
+            Color[] cols = new Color[w * h];
+
+            for (int y = 0; y < h; y++)
+            {
+                for (int x = 0; x < w; x++)
+                {
+                    float cx = (x < r + 2f) ? (r + 2f) : ((x > w - 1f - (r + 2f)) ? (w - 1f - (r + 2f)) : x);
+                    float cy = (h - 1) * 0.5f;
+                    float dist = Vector2.Distance(new Vector2(x, y), new Vector2(cx, cy));
+                    float alpha = Mathf.Clamp01(r + 1.2f - dist);
+                    cols[y * w + x] = new Color(1f, 1f, 1f, alpha);
+                }
+            }
+
+            tex.SetPixels(cols);
+            tex.Apply();
+            capsuleSprite = Sprite.Create(tex, new Rect(0, 0, w, h), new Vector2(0.5f, 0.5f), 100f, 0, SpriteMeshType.FullRect, new Vector4(16, 15, 16, 15));
+            return capsuleSprite;
+        }
+
+        /// <summary>
+        /// Creates a sleek slider with rounded track and smooth circular handle knob matching the reference design.
+        /// </summary>
+        private void CreateGlowingSlider(Transform parent, string label, float initialVal, Vector2 pos, float width, Color glowColor, Action<float> onValueChanged, out Slider outSlider, out TextMeshProUGUI outValText)
+        {
+            GameObject row = new GameObject("SliderRow_" + label);
+            row.transform.SetParent(parent, false);
+            RectTransform rect = row.AddComponent<RectTransform>();
+            rect.anchoredPosition = pos;
+            rect.sizeDelta = new Vector2(width, 20);
+
+            CreateTMPText("Lbl", row.transform, $"<size=9>{label}</size>", 9, TextAlignmentOptions.Left, colTextMuted, new Vector2(-width * 0.5f + 25, 0), new Vector2(50, 18));
+            outValText = CreateTMPText("Val", row.transform, $"{initialVal:F2}", 9, TextAlignmentOptions.Right, colTextLight, new Vector2(width * 0.5f - 14, 0), new Vector2(28, 18));
+
+            // Slider Root
+            float trackW = width - 82f;
+            GameObject sliderObj = new GameObject("Slider");
+            sliderObj.transform.SetParent(row.transform, false);
+            RectTransform slRect = sliderObj.AddComponent<RectTransform>();
+            slRect.anchoredPosition = new Vector2(8, 0);
+            slRect.sizeDelta = new Vector2(trackW, 16);
+
+            Slider slider = sliderObj.AddComponent<Slider>();
+            slider.direction = Slider.Direction.LeftToRight;
+            slider.minValue = 0f;
+            slider.maxValue = 1f;
+
+            // Background Track with smooth rounded capsule ends
+            GameObject bgTrack = CreateUIPanel("Background", sliderObj.transform, Vector2.zero, Vector2.zero, new Color(0.04f, 0.07f, 0.12f, 0.9f));
+            RectTransform bgRect = bgTrack.GetComponent<RectTransform>();
+            bgRect.anchorMin = new Vector2(0, 0.5f);
+            bgRect.anchorMax = new Vector2(1, 0.5f);
+            bgRect.sizeDelta = new Vector2(0, 6);
+            Image bgImg = bgTrack.GetComponent<Image>();
+            bgImg.sprite = GetCapsuleSprite();
+            bgImg.type = Image.Type.Sliced;
+
+            // Fill Area
+            GameObject fillArea = new GameObject("Fill Area");
+            fillArea.transform.SetParent(sliderObj.transform, false);
+            RectTransform fillAreaRect = fillArea.AddComponent<RectTransform>();
+            fillAreaRect.anchorMin = new Vector2(0, 0.5f);
+            fillAreaRect.anchorMax = new Vector2(1, 0.5f);
+            fillAreaRect.offsetMin = new Vector2(0, -3);
+            fillAreaRect.offsetMax = new Vector2(0, 3);
+
+            // Active glowing fill with rounded ends
+            GameObject fill = CreateUIPanel("Fill", fillArea.transform, Vector2.zero, Vector2.zero, glowColor);
+            RectTransform fRect = fill.GetComponent<RectTransform>();
+            fRect.anchorMin = Vector2.zero;
+            fRect.anchorMax = Vector2.one;
+            fRect.sizeDelta = Vector2.zero;
+            Image fillImg = fill.GetComponent<Image>();
+            fillImg.sprite = GetCapsuleSprite();
+            fillImg.type = Image.Type.Sliced;
+            slider.fillRect = fRect;
+
+            // Handle Slide Area
+            GameObject handleSlideArea = new GameObject("Handle Slide Area");
+            handleSlideArea.transform.SetParent(sliderObj.transform, false);
+            RectTransform handleAreaRect = handleSlideArea.AddComponent<RectTransform>();
+            handleAreaRect.anchorMin = Vector2.zero;
+            handleAreaRect.anchorMax = Vector2.one;
+            handleAreaRect.offsetMin = new Vector2(6, 0);
+            handleAreaRect.offsetMax = new Vector2(-6, 0);
+
+            // Crisp Circular Handle Knob matching target reference image
+            GameObject handle = CreateUIPanel("Handle", handleSlideArea.transform, Vector2.zero, new Vector2(13, 13), Color.white);
+            RectTransform hRect = handle.GetComponent<RectTransform>();
+            hRect.sizeDelta = new Vector2(13, 13);
+            Image handleImg = handle.GetComponent<Image>();
+            handleImg.sprite = GetCircleSprite();
+            slider.handleRect = hRect;
+            slider.targetGraphic = handleImg;
+
+            TextMeshProUGUI vRef = outValText;
+            slider.onValueChanged.AddListener((v) =>
+            {
+                vRef.text = $"{v:F2}";
+                onValueChanged?.Invoke(v);
+            });
+
+            slider.value = initialVal;
+            outSlider = slider;
+        }
+
+        private void UpdateSwatchOutlines()
+        {
+            for (int i = 0; i < swatchOutlines.Count; i++)
+            {
+                if (swatchOutlines[i] != null)
+                {
+                    swatchOutlines[i].color = (i == selectedSwatchIndex) ? Color.white : Color.clear;
+                }
+            }
+        }
+
+        // ─── 2. CREATE CARD ───
+        private void BuildCreateCard(Transform parent, Vector2 pos, Vector2 size)
+        {
+            GameObject card = CreateCardPanel("Card_Create", parent, pos, size, "◈ CREATE", true);
+
+            string[] names = { "Box", "Cylinder", "Sphere", "Cone", "Prism", "Wedge" };
+            string[] icons = { "◻", "⬡", "●", "▲", "▷", "◢" };
+            CADShapeType[] types = { CADShapeType.Box, CADShapeType.Cylinder, CADShapeType.Sphere, CADShapeType.Cone, CADShapeType.Prism, CADShapeType.Wedge };
+
+            float btnW = 46f;
+            float btnH = 50f;
+            float gap = 5f;
+
+            int cols = 3;
+            float totalRowW = cols * btnW + (cols - 1) * gap;
+            float sx = -totalRowW * 0.5f + btnW * 0.5f;
+
+            for (int i = 0; i < names.Length; i++)
+            {
+                int row = i / cols;
+                int col = i % cols;
+                float bx = sx + col * (btnW + gap);
+                float by = 75f - row * (btnH + gap + 10);
+                bool active = (i == 0);
+
+                CreatePrimitiveButton($"Prim_{names[i]}", card.transform, new Vector2(bx, by), new Vector2(btnW, btnH),
+                    icons[i], names[i], types[i], active);
+            }
+        }
+
+        private void CreatePrimitiveButton(string name, Transform parent, Vector2 pos, Vector2 size, string icon, string label, CADShapeType shapeType, bool activeByDefault)
+        {
+            Color bgCol = activeByDefault ? colCyanActive : colBtnNormal;
+
+            GameObject obj = new GameObject(name);
+            obj.transform.SetParent(parent, false);
+            RectTransform rect = obj.AddComponent<RectTransform>();
+            rect.anchoredPosition = pos;
+            rect.sizeDelta = size;
+
+            Image img = obj.AddComponent<Image>();
+            img.color = bgCol;
+
+            Button btn = obj.AddComponent<Button>();
+            ColorBlock cb = btn.colors;
+            cb.normalColor = bgCol;
+            cb.highlightedColor = bgCol * 1.25f;
+            cb.pressedColor = colCyanActive;
+            btn.colors = cb;
+
+            if (activeByDefault) activePrimitiveBtn = btn;
+
+            btn.onClick.AddListener(() =>
+            {
+                if (activePrimitiveBtn != null && activePrimitiveBtn != btn) SetBtnColor(activePrimitiveBtn, colBtnNormal);
+                SetBtnColor(btn, colCyanActive);
+                activePrimitiveBtn = btn;
+                CADManagerHub.Instance?.CreatePrimitive(shapeType);
+            });
+
+            CreateTMPText("Icon", obj.transform, icon, 16, TextAlignmentOptions.Center, colTextLight, new Vector2(0, 7), new Vector2(size.x, 22));
+            CreateTMPText("Label", obj.transform, $"<size=8>{label}</size>", 8, TextAlignmentOptions.Center, colTextLight, new Vector2(0, -12), new Vector2(size.x, 14));
+        }
+
+        // ─── 3. TRANSFORM CARD (Interactive Dimensions & Steppers) ───
+        private void BuildTransformCard(Transform parent, Vector2 pos, Vector2 size)
+        {
+            GameObject card = CreateCardPanel("Card_Transform", parent, pos, size, "✥ TRANSFORM", true);
+
+            // Position Section
+            CreateTMPText("PosHdr", card.transform, "<size=10><b>Position</b></size>", 10, TextAlignmentOptions.Left, colTextMuted, new Vector2(-size.x * 0.5f + 14, 110), new Vector2(80, 14));
+            var posFields = CreateInteractiveXYZRow(card.transform, new Vector2(0, 85), size.x - 20f, 0, "0.000", "0.000", "0.000");
+            posXText = posFields.Item1;
+            posYText = posFields.Item2;
+            posZText = posFields.Item3;
+
+            // Rotation Section
+            CreateTMPText("RotHdr", card.transform, "<size=10><b>Rotation</b></size>", 10, TextAlignmentOptions.Left, colTextMuted, new Vector2(-size.x * 0.5f + 14, 35), new Vector2(80, 14));
+            var rotFields = CreateInteractiveXYZRow(card.transform, new Vector2(0, 10), size.x - 20f, 1, "0.000", "0.000", "0.000");
+            rotXText = rotFields.Item1;
+            rotYText = rotFields.Item2;
+            rotZText = rotFields.Item3;
+
+            // Scale Section
+            CreateTMPText("ScaHdr", card.transform, "<size=10><b>Scale</b></size>", 10, TextAlignmentOptions.Left, colTextMuted, new Vector2(-size.x * 0.5f + 14, -40), new Vector2(80, 14));
+            var scaFields = CreateInteractiveXYZRow(card.transform, new Vector2(0, -65), size.x - 20f, 2, "0.200", "0.200", "0.200");
+            scaleXText = scaFields.Item1;
+            scaleYText = scaFields.Item2;
+            scaleZText = scaFields.Item3;
+        }
+
+        private (TextMeshProUGUI, TextMeshProUGUI, TextMeshProUGUI) CreateInteractiveXYZRow(Transform parent, Vector2 pos, float width, int section, string defX, string defY, string defZ)
+        {
+            GameObject row = new GameObject("XYZRow_" + section);
+            row.transform.SetParent(parent, false);
+            RectTransform rect = row.AddComponent<RectTransform>();
+            rect.anchoredPosition = pos;
+            rect.sizeDelta = new Vector2(width, 22);
+
+            float groupW = 76f;
+            float gap = 4f;
+            float totalW = 3 * groupW + 2 * gap;
+            float sx = -totalW * 0.5f;
+
+            string[] axes = { "X", "Y", "Z" };
+            Color[] axisColors = { colAxisRed, colAxisGreen, colAxisBlue };
+            string[] defVals = { defX, defY, defZ };
+            TextMeshProUGUI[] texts = new TextMeshProUGUI[3];
+
+            for (int axis = 0; axis < 3; axis++)
+            {
+                int aIdx = axis;
+                float gx = sx + axis * (groupW + gap) + groupW * 0.5f;
+
+                GameObject group = new GameObject("AxisGroup_" + axes[axis]);
+                group.transform.SetParent(row.transform, false);
+                RectTransform grpRect = group.AddComponent<RectTransform>();
+                grpRect.anchoredPosition = new Vector2(gx, 0);
+                grpRect.sizeDelta = new Vector2(groupW, 22);
+
+                CreateMiniStepBtn("-", group.transform, new Vector2(-groupW * 0.5f + 8, 0), new Vector2(16, 18), () =>
+                {
+                    OnStepDimension(section, aIdx, -1);
+                });
+
+                GameObject valBox = CreateUIPanel("ValBox", group.transform, new Vector2(0, 0), new Vector2(40, 20), colInsetField);
+                Button valBtn = valBox.AddComponent<Button>();
+                ColorBlock cb = valBtn.colors;
+                cb.normalColor = colInsetField;
+                cb.highlightedColor = colBtnHover;
+                cb.pressedColor = colCyanActive * 0.5f;
+                valBtn.colors = cb;
+                valBtn.onClick.AddListener(() =>
+                {
+                    OpenNumpadModal(section, aIdx);
+                });
+
+                CreateTMPText("Badge", valBox.transform, axes[axis], 7, TextAlignmentOptions.Left, axisColors[axis], new Vector2(-13, 0), new Vector2(10, 16));
+                texts[axis] = CreateTMPText("Val", valBox.transform, defVals[axis], 9, TextAlignmentOptions.Right, colTextLight, new Vector2(4, 0), new Vector2(28, 16));
+
+                CreateMiniStepBtn("+", group.transform, new Vector2(groupW * 0.5f - 8, 0), new Vector2(16, 18), () =>
+                {
+                    OnStepDimension(section, aIdx, +1);
                 });
             }
 
-            // Plus Button
-            CreateButtonWithLabel("Btn_AddPreset", card.transform, new Vector2(75, -90), new Vector2(22, 22), "+", () =>
+            return (texts[0], texts[1], texts[2]);
+        }
+
+        private void OnStepDimension(int section, int axis, int direction)
+        {
+            if (section == 0) // Position
             {
-                CADManagerHub.Instance?.EmitStatus("Saved custom color preset");
-            });
-        }
-
-        private void BuildTextureCard(Transform parent, Vector2 pos, Vector2 size)
-        {
-            GameObject card = CreateCardPanel("Card_Texture", parent, pos, size, "▦ TEXTURE");
-
-            // Slot 1
-            CreateTextureSlotRow(card.transform, "Slot 1", new Vector2(0, 70));
-            // Slot 2
-            CreateTextureSlotRow(card.transform, "Slot 2", new Vector2(0, 20));
-
-            // Tiling
-            CreateParamRow(card.transform, "Tiling", "X", "1.00", "Y", "1.00", new Vector2(0, -35));
-            // Offset
-            CreateParamRow(card.transform, "Offset", "X", "0.00", "Y", "0.00", new Vector2(0, -85));
-        }
-
-        private void BuildScaleCard(Transform parent, Vector2 pos, Vector2 size)
-        {
-            GameObject card = CreateCardPanel("Card_Scale", parent, pos, size, "⤢ SCALE");
-
-            scaleXText = CreateStepperRow(card.transform, "X", "1.000", new Vector2(0, 75),
-                () => CADManagerHub.Instance?.AdjustSelectedScale(0, -0.05f, uniformScaleEnabled),
-                () => CADManagerHub.Instance?.AdjustSelectedScale(0, +0.05f, uniformScaleEnabled));
-
-            scaleYText = CreateStepperRow(card.transform, "Y", "1.000", new Vector2(0, 25),
-                () => CADManagerHub.Instance?.AdjustSelectedScale(1, -0.05f, uniformScaleEnabled),
-                () => CADManagerHub.Instance?.AdjustSelectedScale(1, +0.05f, uniformScaleEnabled));
-
-            scaleZText = CreateStepperRow(card.transform, "Z", "1.000", new Vector2(0, -25),
-                () => CADManagerHub.Instance?.AdjustSelectedScale(2, -0.05f, uniformScaleEnabled),
-                () => CADManagerHub.Instance?.AdjustSelectedScale(2, +0.05f, uniformScaleEnabled));
-
-            // Uniform Toggle Row
-            CreateButtonWithLabel("Btn_Link", card.transform, new Vector2(-60, -85), new Vector2(35, 35), "🔗", () =>
+                float step = activeGridSnap > 0 ? activeGridSnap : 0.01f;
+                CADManagerHub.Instance?.AdjustSelectedPosition(axis, direction * step);
+            }
+            else if (section == 1) // Rotation
             {
-                uniformScaleEnabled = !uniformScaleEnabled;
-                UpdateUniformButtonState();
-            });
-
-            uniformBtn = CreateButtonWithLabel("Btn_Uniform", card.transform, new Vector2(25, -85), new Vector2(120, 35), "<size=12><b>UNIFORM</b></size>", () =>
+                float step = activeAngleSnap > 0 ? activeAngleSnap : 15f;
+                CADManagerHub.Instance?.AdjustSelectedRotation(axis, direction * step);
+            }
+            else if (section == 2) // Scale
             {
-                uniformScaleEnabled = !uniformScaleEnabled;
-                UpdateUniformButtonState();
-            });
-            UpdateUniformButtonState();
+                float step = 0.02f;
+                CADManagerHub.Instance?.AdjustSelectedScale(axis, direction * step, false);
+            }
         }
 
-        private void BuildRotateCard(Transform parent, Vector2 pos, Vector2 size)
+        private void CreateMiniStepBtn(string text, Transform parent, Vector2 pos, Vector2 size, Action onClick)
         {
-            GameObject card = CreateCardPanel("Card_Rotate", parent, pos, size, "⟳ ROTATE");
+            GameObject obj = new GameObject("StepBtn_" + text);
+            obj.transform.SetParent(parent, false);
+            RectTransform rect = obj.AddComponent<RectTransform>();
+            rect.anchoredPosition = pos;
+            rect.sizeDelta = size;
 
-            rotXText = CreateStepperRow(card.transform, "X", "0.00°", new Vector2(0, 75),
-                () => CADManagerHub.Instance?.AdjustSelectedRotation(0, -15f),
-                () => CADManagerHub.Instance?.AdjustSelectedRotation(0, +15f));
+            Image img = obj.AddComponent<Image>();
+            img.color = colBtnNormal;
 
-            rotYText = CreateStepperRow(card.transform, "Y", "0.00°", new Vector2(0, 25),
-                () => CADManagerHub.Instance?.AdjustSelectedRotation(1, -15f),
-                () => CADManagerHub.Instance?.AdjustSelectedRotation(1, +15f));
+            Button btn = obj.AddComponent<Button>();
+            ColorBlock cb = btn.colors;
+            cb.normalColor = colBtnNormal;
+            cb.highlightedColor = colBtnHover;
+            cb.pressedColor = colCyanActive;
+            btn.colors = cb;
+            if (onClick != null) btn.onClick.AddListener(() => onClick());
 
-            rotZText = CreateStepperRow(card.transform, "Z", "0.00°", new Vector2(0, -25),
-                () => CADManagerHub.Instance?.AdjustSelectedRotation(2, -15f),
-                () => CADManagerHub.Instance?.AdjustSelectedRotation(2, +15f));
+            CreateTMPText("Lbl", obj.transform, text, 11, TextAlignmentOptions.Center, colTextLight, Vector2.zero, size);
         }
 
-        private void BuildPositionCard(Transform parent, Vector2 pos, Vector2 size)
+        // ─── 4. SNAP CARD ───
+        private void BuildSnapCard(Transform parent, Vector2 pos, Vector2 size)
         {
-            GameObject card = CreateCardPanel("Card_Position", parent, pos, size, "✥ POSITION");
+            GameObject card = CreateCardPanel("Card_Snap", parent, pos, size, "⊞ SNAP", true);
 
-            posXText = CreateStepperRow(card.transform, "X", "0.000", new Vector2(0, 75),
-                () => CADManagerHub.Instance?.AdjustSelectedPosition(0, -0.05f),
-                () => CADManagerHub.Instance?.AdjustSelectedPosition(0, +0.05f));
+            // Grid Snap
+            CreateTMPText("GridHdr", card.transform, "<size=9><b>Grid Snap</b></size>", 9, TextAlignmentOptions.Left, colTextMuted, new Vector2(-size.x * 0.5f + 14, 110), new Vector2(size.x - 28, 14));
 
-            posYText = CreateStepperRow(card.transform, "Y", "0.000", new Vector2(0, 25),
-                () => CADManagerHub.Instance?.AdjustSelectedPosition(1, -0.05f),
-                () => CADManagerHub.Instance?.AdjustSelectedPosition(1, +0.05f));
+            string[] gridLabels = { "1mm", "5mm", "10mm", "50mm" };
+            float[] gridValues = { 0.001f, 0.005f, 0.010f, 0.050f };
+            float gBtnW = 38f;
+            float gGap = 4f;
+            float gTotalW = gridLabels.Length * gBtnW + (gridLabels.Length - 1) * gGap;
+            float gsx = -gTotalW * 0.5f + gBtnW * 0.5f;
 
-            posZText = CreateStepperRow(card.transform, "Z", "0.000", new Vector2(0, -25),
-                () => CADManagerHub.Instance?.AdjustSelectedPosition(2, -0.05f),
-                () => CADManagerHub.Instance?.AdjustSelectedPosition(2, +0.05f));
+            gridSnapButtons.Clear();
+            for (int i = 0; i < gridLabels.Length; i++)
+            {
+                int idx = i;
+                float bx = gsx + i * (gBtnW + gGap);
+                bool active = Mathf.Approximately(gridValues[i], activeGridSnap);
+                Button btn = CreateToggleBtn($"GSnap_{gridLabels[i]}", card.transform, new Vector2(bx, 84), new Vector2(gBtnW, 22), gridLabels[i], active, () => SetGridSnap(gridValues[idx]));
+                gridSnapButtons[gridLabels[i]] = btn;
+            }
+
+            // Angle Snap
+            CreateTMPText("AngHdr", card.transform, "<size=9><b>Angle Snap</b></size>", 9, TextAlignmentOptions.Left, colTextMuted, new Vector2(-size.x * 0.5f + 14, 38), new Vector2(size.x - 28, 14));
+
+            string[] angLabels = { "5°", "15°", "45°", "90°" };
+            float[] angValues = { 5f, 15f, 45f, 90f };
+
+            angleSnapButtons.Clear();
+            for (int i = 0; i < angLabels.Length; i++)
+            {
+                int idx = i;
+                float bx = gsx + i * (gBtnW + gGap);
+                bool active = Mathf.Approximately(angValues[i], activeAngleSnap);
+                Button btn = CreateToggleBtn($"ASnap_{angLabels[i]}", card.transform, new Vector2(bx, 12), new Vector2(gBtnW, 22), angLabels[i], active, () => SetAngleSnap(angValues[idx]));
+                angleSnapButtons[angLabels[i]] = btn;
+            }
+
+            // Axis Lock
+            CreateTMPText("LockHdr", card.transform, "<size=9><b>AXIS LOCK</b></size>", 9, TextAlignmentOptions.Left, colTextMuted, new Vector2(-size.x * 0.5f + 14, -36), new Vector2(size.x - 28, 14));
+
+            float aBtnW = 48f;
+            float aGap = 6f;
+            float aTotalW = 3 * aBtnW + 2 * aGap;
+            float asx = -aTotalW * 0.5f + aBtnW * 0.5f;
+
+            string[] ax = { "X", "Y", "Z" };
+            Color[] axColors = { colAxisRed, colAxisGreen, colAxisBlue };
+            AxisConstraint[] csts = { AxisConstraint.LockX, AxisConstraint.LockY, AxisConstraint.LockZ };
+
+            axisLockButtons.Clear();
+            for (int i = 0; i < ax.Length; i++)
+            {
+                int idx = i;
+                float bx = asx + i * (aBtnW + aGap);
+                Button btn = CreateAxisLockBtn($"Lock_{ax[i]}", card.transform, new Vector2(bx, -64), new Vector2(aBtnW, 26), ax[i], axColors[i], () => ToggleAxisLock(csts[idx]));
+                axisLockButtons[ax[i]] = btn;
+            }
+        }
+
+        // ─── 5. OPERATIONS CARD ───
+        private void BuildOperationsCard(Transform parent, Vector2 pos, Vector2 size)
+        {
+            GameObject card = CreateCardPanel("Card_Operations", parent, pos, size, "❐ OPERATIONS", true);
+
+            string[] names = { "Extrude", "Bevel", "Chamfer", "Hole Cut", "Union", "Subtract" };
+            string[] icons = { "⤊", "⌒", "◿", "⊚", "⧉", "⊟" };
+            Action[] actions = {
+                () => CADManagerHub.Instance?.ExtrudeSelection(0.05f),
+                () => CADManagerHub.Instance?.ApplyBevelToSelection(0.03f),
+                () => CADManagerHub.Instance?.ApplyChamferToSelection(0.03f),
+                () => CADManagerHub.Instance?.CutHoleInSelection(0.03f, 0.25f),
+                () => CADManagerHub.Instance?.PerformUnion(),
+                () => CADManagerHub.Instance?.PerformCombine(),
+            };
+
+            float btnW = 54f;
+            float btnH = 50f;
+            float gap = 5f;
+
+            int cols = 3;
+            float totalRowW = cols * btnW + (cols - 1) * gap;
+            float sx = -totalRowW * 0.5f + btnW * 0.5f;
+
+            for (int i = 0; i < names.Length; i++)
+            {
+                int row = i / cols;
+                int col = i % cols;
+                float bx = sx + col * (btnW + gap);
+                float by = 65f - row * (btnH + gap + 10);
+
+                CreateIconBtn(names[i], card.transform, new Vector2(bx, by), new Vector2(btnW, btnH), icons[i], names[i], actions[i]);
+            }
+        }
+
+        // ─── 6. SELECTION CARD ───
+        private void BuildSelectionCard(Transform parent, Vector2 pos, Vector2 size)
+        {
+            GameObject card = CreateCardPanel("Card_Selection", parent, pos, size, "⛶ SELECTION", false);
+
+            string[] mNames = { "Object", "Face", "Edge", "Vertex" };
+            string[] mIcons = { "❒", "◫", "━", "•" };
+            SelectionMode[] mModes = { SelectionMode.Object, SelectionMode.Face, SelectionMode.Edge, SelectionMode.Vertex };
+
+            float btnW = 46f;
+            float btnH = 50f;
+            float gap = 5f;
+
+            selectionModeButtons.Clear();
+            for (int i = 0; i < mNames.Length; i++)
+            {
+                int idx = i;
+                int row = i / 2;
+                int col = i % 2;
+                float bx = -btnW * 0.5f - gap * 0.5f + col * (btnW + gap);
+                float by = 65f - row * (btnH + gap + 10);
+                bool active = (mModes[i] == currentSelectionMode);
+                Color bg = active ? colCyanActive : colBtnNormal;
+
+                Button btn = CreateIconBtnColored($"Sel_{mNames[i]}", card.transform, new Vector2(bx, by), new Vector2(btnW, btnH), mIcons[i], mNames[i], bg, () => SetSelectionMode(mModes[idx]));
+                selectionModeButtons[mNames[i]] = btn;
+            }
+        }
+
+        // ─── 7. UTILITY CARD ───
+        private void BuildUtilityCard(Transform parent, Vector2 pos, Vector2 size)
+        {
+            GameObject card = CreateCardPanel("Card_Utility", parent, pos, size, "🔧 UTILITY", true);
+
+            float btnW = 60f;
+            float btnH = 50f;
+            float gap = 5f;
+
+            string[] names = { "Constraints", "Measure", "Align", "Reset View" };
+            string[] icons = { "⊿", "📏", "⊞", "↻" };
+            Action[] actions = {
+                () => CADManagerHub.Instance?.EmitStatus("Constraints: None active"),
+                () => CADManagerHub.Instance?.EmitStatus("Measure Tool Ready"),
+                () => CADManagerHub.Instance?.EmitStatus("Align Object to Grid"),
+                () => CADManagerHub.Instance?.EmitStatus("Workspace View Reset")
+            };
+
+            for (int i = 0; i < names.Length; i++)
+            {
+                int idx = i;
+                int row = i / 2;
+                int col = i % 2;
+                float bx = -btnW * 0.5f - gap * 0.5f + col * (btnW + gap);
+                float by = 65f - row * (btnH + gap + 10);
+
+                CreateIconBtn(names[i], card.transform, new Vector2(bx, by), new Vector2(btnW, btnH), icons[i], names[i], actions[idx]);
+            }
+        }
+
+        // ─── 8. FILE CARD ───
+        private void BuildFileCard(Transform parent, Vector2 pos, Vector2 size)
+        {
+            GameObject card = CreateCardPanel("Card_File", parent, pos, size, "📁 FILE", true);
+
+            float btnW = 72f;
+            float btnH = 46f;
+            float gap = 6f;
+
+            // Row 1: Export STL, Export OBJ
+            CreateIconBtnColored("ExpSTL", card.transform, new Vector2(-btnW * 0.5f - gap * 0.5f, 65), new Vector2(btnW, btnH), "📦", "Export STL", colGreenExport, () => CADManagerHub.Instance?.ExportSelectedSTL());
+            CreateIconBtnColored("ExpOBJ", card.transform, new Vector2(btnW * 0.5f + gap * 0.5f, 65), new Vector2(btnW, btnH), "📦", "Export OBJ", colGreenExport, () => CADManagerHub.Instance?.ExportSelectedOBJ());
+
+            // Row 2: Clear, Undo, Redo
+            float r2Y = 3f;
+            float smW = 46f;
+            CreateIconBtnColored("Btn_ClearF", card.transform, new Vector2(-smW - gap, r2Y), new Vector2(smW, btnH), "🗑", "Clear", colRedClear, () => CADManagerHub.Instance?.ShapeManager?.ClearAll());
+            CreateIconBtn("Btn_UndoF", card.transform, new Vector2(0, r2Y), new Vector2(smW, btnH), "↶", "Undo", () => CADManagerHub.Instance?.EmitStatus("Undo"));
+            CreateIconBtn("Btn_RedoF", card.transform, new Vector2(smW + gap, r2Y), new Vector2(smW, btnH), "↷", "Redo", () => CADManagerHub.Instance?.EmitStatus("Redo"));
         }
 
         #endregion
 
-        #region Bottom Main Dock
+        // ════════════════════════════════════════════════════════
+        //  BOTTOM ACTION DOCK
+        // ════════════════════════════════════════════════════════
+
+        #region Bottom Dock
 
         private void BuildBottomDock(Transform parent)
         {
-            float dockY = -190f;
-            float dockW = 1260f;
-            float dockH = 260f;
+            GameObject dock = CreateUIPanel("BottomDock", parent, new Vector2(0, DOCK_Y), new Vector2(TOP_BAR_W, DOCK_H), colDockBg);
 
-            GameObject dockPanel = CreateUIPanel("BottomDock", parent, new Vector2(0, dockY), new Vector2(dockW, dockH), colBgDark);
+            // Glowing top border
+            CreateUIPanel("DockGlow", dock.transform, new Vector2(0, DOCK_H * 0.5f - 1), new Vector2(TOP_BAR_W, 2), colCardBorderGlow);
 
-            // 1. Tab Navigation Bar
-            string[] tabs = new[] { "❖  MODELING", "⚒  EDITING", "⬡  COMBINE", "⁘  VERTEX", "🔧  UTILITY" };
-            float tabSpacing = 160f;
-            float startTabX = -dockW * 0.5f + 110f;
+            float btnW = 74f;
+            float btnH = 36f;
+            float gap = 5f;
 
-            for (int i = 0; i < tabs.Length; i++)
+            string[] labels = { "Undo", "Redo", "Set Sub", "Arc", "Rotation", "Position", "Perform", "+Add", "Edge Mode", "Perform Cut", "Mark Union", "Perform Union" };
+
+            Action[] dockActions = {
+                () => CADManagerHub.Instance?.Undo(),
+                () => CADManagerHub.Instance?.Redo(),
+                () => CADManagerHub.Instance?.MarkForCombine(),
+                () => CADManagerHub.Instance?.EmitStatus("Arc Tool"),
+                () => { var tm = CADManagerHub.Instance?.TransformManager; var sel = CADManagerHub.Instance?.SelectionManager?.SelectedObject; if (tm != null && sel != null) tm.RotateObject(sel, Vector3.up, 15f); },
+                () => { var tm = CADManagerHub.Instance?.TransformManager; var sel = CADManagerHub.Instance?.SelectionManager?.SelectedObject; if (tm != null && sel != null) tm.NudgeObject(sel, Vector3.up); },
+                () => CADManagerHub.Instance?.PerformCombine(),
+                () => CADManagerHub.Instance?.CreatePrimitive(CADShapeType.Box),
+                () => CADManagerHub.Instance?.SetSelectionMode(SelectionMode.Edge),
+                () => CADManagerHub.Instance?.PerformCombine(),
+                () => CADManagerHub.Instance?.MarkForUnion(),
+                () => CADManagerHub.Instance?.PerformUnion(),
+            };
+
+            float totalBtnsW = labels.Length * btnW + (labels.Length - 1) * gap;
+            float startX = -totalBtnsW * 0.5f + btnW * 0.5f - 70f;
+
+            for (int i = 0; i < labels.Length; i++)
             {
-                int tabIdx = i;
-                float tx = startTabX + i * tabSpacing;
-                TextMeshProUGUI tLabel = CreateTMPText($"Tab_{i}", dockPanel.transform, $"<b>{tabs[i]}</b>", 14, TextAlignmentOptions.Center, (i == 0) ? colCyanActive : colTextMuted, new Vector2(tx, dockH * 0.5f - 22), new Vector2(140, 30));
-                tabLabels.Add(tLabel);
-
-                // Invisible button over tab
-                Button btn = tLabel.gameObject.AddComponent<Button>();
-                btn.onClick.AddListener(() => SwitchBottomTab(tabIdx));
+                int idx = i;
+                float bx = startX + i * (btnW + gap);
+                CreateStyledButton($"Dock_{i}", dock.transform, new Vector2(bx, 0), new Vector2(btnW, btnH),
+                    $"<size=9>{labels[i]}</size>", colBtnNormal, colBtnBorder, dockActions[idx]);
             }
 
-            // Cyan Underline indicator
-            tabUnderline = CreateUIPanel("TabUnderline", dockPanel.transform, new Vector2(startTabX, dockH * 0.5f - 36), new Vector2(130, 3), colCyanActive);
+            float clearAllX = startX + labels.Length * (btnW + gap) + 6f;
+            CreateStyledButton("Dock_ClearAll", dock.transform, new Vector2(clearAllX, 0), new Vector2(86, btnH),
+                "<size=10><b>Clear All</b></size>", colBlueAction, colBlueAction * 1.2f, () => CADManagerHub.Instance?.ShapeManager?.ClearAll());
 
-            // Separator Line
-            CreateUIPanel("SepLine", dockPanel.transform, new Vector2(0, dockH * 0.5f - 40), new Vector2(dockW - 40, 1), new Color(0.18f, 0.24f, 0.35f, 0.6f));
-
-            // 2. Sections Container (Columns)
-            float contentCenterY = -15f;
-
-            // Column 1: CREATE (x: -490)
-            BuildCreateColumn(dockPanel.transform, new Vector2(-490, contentCenterY));
-
-            // Column 2: APPEARANCE (x: -330)
-            BuildAppearanceColumn(dockPanel.transform, new Vector2(-330, contentCenterY));
-
-            // Column 3: TRANSFORM (x: -150)
-            BuildTransformColumn(dockPanel.transform, new Vector2(-150, contentCenterY));
-
-            // Column 4: OPERATIONS (x: 50)
-            BuildOperationsColumn(dockPanel.transform, new Vector2(50, contentCenterY));
-
-            // Column 5: BOOLEAN (x: 270)
-            BuildBooleanColumn(dockPanel.transform, new Vector2(270, contentCenterY));
-
-            // Right Action Dock: CLEAR ALL & CLEAR (x: 480)
-            BuildRightActionDock(dockPanel.transform, new Vector2(490, contentCenterY));
-        }
-
-        private void BuildCreateColumn(Transform parent, Vector2 pos)
-        {
-            CreateColumnHeader(parent, "CREATE", new Vector2(pos.x, pos.y + 70));
-
-            CreateDockButton("Btn_Spline", parent, new Vector2(pos.x, pos.y + 25), new Vector2(135, 52), "<b>╭─╮  SPLINE</b>", () =>
-            {
-                CADManagerHub.Instance?.CreatePrimitive(CADShapeType.Cylinder);
-            });
-
-            CreateDockButton("Btn_Extrude", parent, new Vector2(pos.x, pos.y - 35), new Vector2(135, 52), "<b>⇪  EXTRUDE</b>", () =>
-            {
-                CADManagerHub.Instance?.ExtrudeSelection(0.05f);
-            });
-        }
-
-        private void BuildAppearanceColumn(Transform parent, Vector2 pos)
-        {
-            CreateColumnHeader(parent, "APPEARANCE", new Vector2(pos.x, pos.y + 70));
-
-            CreateDockButton("Btn_Colour", parent, new Vector2(pos.x, pos.y + 25), new Vector2(150, 52), "<b>🎨  COLOUR</b>", () =>
-            {
-                CADManagerHub.Instance?.SetSelectionMode(SelectionMode.Object);
-            });
-
-            CreateDockButton("Btn_SetSubCombine", parent, new Vector2(pos.x, pos.y - 35), new Vector2(150, 52), "<size=11><b>❐  SET SUB COMBINE</b></size>", () =>
-            {
-                CADManagerHub.Instance?.MarkForCombine();
-            });
-        }
-
-        private void BuildTransformColumn(Transform parent, Vector2 pos)
-        {
-            CreateColumnHeader(parent, "TRANSFORM", new Vector2(pos.x, pos.y + 70));
-
-            CreateDockButton("Btn_Rotation", parent, new Vector2(pos.x, pos.y + 40), new Vector2(145, 42), "<b>⟳  ROTATION</b>", () =>
-            {
-                CADManagerHub.Instance?.TransformManager?.RotateObject(CADManagerHub.Instance.SelectionManager.SelectedObject, Vector3.up, 15f);
-            });
-
-            CreateDockButton("Btn_Position", parent, new Vector2(pos.x, pos.y - 5), new Vector2(145, 42), "<b>✥  POSITION</b>", () =>
-            {
-                CADManagerHub.Instance?.TransformManager?.NudgeObject(CADManagerHub.Instance.SelectionManager.SelectedObject, Vector3.up);
-            });
-
-            CreateDockButton("Btn_Scale", parent, new Vector2(pos.x, pos.y - 50), new Vector2(145, 42), "<b>⤢  SCALE</b>", () =>
-            {
-                CADManagerHub.Instance?.TransformManager?.ScaleObject(CADManagerHub.Instance.SelectionManager.SelectedObject, Vector3.one * 1.1f);
-            });
-        }
-
-        private void BuildOperationsColumn(Transform parent, Vector2 pos)
-        {
-            CreateColumnHeader(parent, "OPERATIONS", new Vector2(pos.x, pos.y + 70));
-
-            // Add & Switch row
-            CreateDockButton("Btn_Add", parent, new Vector2(pos.x - 45, pos.y + 35), new Vector2(95, 46), "<color=#22c55e><b>+ ADD</b></color>", () =>
-            {
-                CADManagerHub.Instance?.CreatePrimitive(CADShapeType.Box);
-            });
-
-            CreateDockButton("Btn_Switch", parent, new Vector2(pos.x + 55, pos.y + 35), new Vector2(95, 46), "<b>⇄ SWITCH</b>", () =>
-            {
-                CADManagerHub.Instance?.SetSelectionMode(SelectionMode.Face);
-            });
-
-            // Mark Combine
-            CreateDockButton("Btn_MarkCombine", parent, new Vector2(pos.x + 5, pos.y - 12), new Vector2(195, 42), "<size=11><b>⬚  MARK COMBINE</b></size>", () =>
-            {
-                CADManagerHub.Instance?.MarkForCombine();
-            });
-
-            // Mark Union
-            CreateDockButton("Btn_MarkUnion", parent, new Vector2(pos.x + 5, pos.y - 58), new Vector2(195, 42), "<size=11><color=#22c55e><b>✓  MARK UNION</b></color></size>", () =>
-            {
-                CADManagerHub.Instance?.MarkForUnion();
-            });
-        }
-
-        private void BuildBooleanColumn(Transform parent, Vector2 pos)
-        {
-            CreateColumnHeader(parent, "BOOLEAN", new Vector2(pos.x, pos.y + 70));
-
-            CreateDockButton("Btn_PerformCombine", parent, new Vector2(pos.x, pos.y + 40), new Vector2(175, 42), "<size=11><color=#38bdf8><b>❖ PERFORM COMBINE</b></color></size>", () =>
-            {
-                CADManagerHub.Instance?.PerformCombine();
-            });
-
-            CreateDockButton("Btn_PerformUnion", parent, new Vector2(pos.x, pos.y - 5), new Vector2(175, 42), "<size=11><color=#22c55e><b>❖ PERFORM UNION</b></color></size>", () =>
-            {
-                CADManagerHub.Instance?.PerformUnion();
-            });
-
-            CreateDockButton("Btn_EdgeMode", parent, new Vector2(pos.x, pos.y - 50), new Vector2(175, 42), "<size=11><color=#38bdf8><b>⬡ EDGE MODE</b></color></size>", () =>
-            {
-                CADManagerHub.Instance?.SetSelectionMode(SelectionMode.Edge);
-            });
-        }
-
-        private void BuildRightActionDock(Transform parent, Vector2 pos)
-        {
-            // Clear All Button (Blue)
-            CreateColoredButton("Btn_ClearAll", parent, new Vector2(pos.x, pos.y + 25), new Vector2(95, 80), "<b>🧹</b>\n<size=11><b>CLEAR ALL</b></size>", colBlueClearAll, () =>
-            {
-                CADManagerHub.Instance?.ShapeManager?.ClearAll();
-            });
-
-            // Clear Single (Red)
-            CreateColoredButton("Btn_ClearSingle", parent, new Vector2(pos.x, pos.y - 65), new Vector2(95, 80), "<b>🗑</b>\n<size=11><b>CLEAR</b></size>", colRedClear, () =>
-            {
-                CADManagerHub.Instance?.DeleteSelected();
-            });
+            CreateStyledButton("Dock_Clear", dock.transform, new Vector2(clearAllX + 86 + gap, 0), new Vector2(66, btnH),
+                "<size=10><b>Delete</b></size>", colRedClear, colRedClear * 1.2f, () => CADManagerHub.Instance?.DeleteSelected());
         }
 
         #endregion
 
-        #region Factory Helpers & Component Builders
+        // ════════════════════════════════════════════════════════
+        //  NUMPAD MODAL (Enter Exact Dimensions)
+        // ════════════════════════════════════════════════════════
 
-        private GameObject CreateCardPanel(string name, Transform parent, Vector2 pos, Vector2 size, string title)
+        #region Numpad Modal
+
+        private void BuildNumpadModal(Transform parent)
+        {
+            numpadPanel = CreateUIPanel("NumpadModal", parent, new Vector2(0, 40), new Vector2(230, 270), new Color(0.06f, 0.08f, 0.14f, 0.98f));
+
+            CreateUIPanel("NBdrT", numpadPanel.transform, new Vector2(0, 134), new Vector2(230, 2), colCyanActive);
+            CreateUIPanel("NBdrB", numpadPanel.transform, new Vector2(0, -134), new Vector2(230, 2), colCyanActive);
+
+            numpadTitleText = CreateTMPText("NTitle", numpadPanel.transform, "<b>ENTER DIMENSION</b>", 10, TextAlignmentOptions.Center, colCyanActive, new Vector2(0, 116), new Vector2(210, 18));
+
+            GameObject dispBox = CreateUIPanel("NDisp", numpadPanel.transform, new Vector2(0, 88), new Vector2(200, 28), colInsetField);
+            numpadDisplayText = CreateTMPText("NVal", dispBox.transform, "0.000", 14, TextAlignmentOptions.Right, colTextLight, new Vector2(0, 0), new Vector2(190, 24));
+
+            string[][] keys = {
+                new string[] { "7", "8", "9" },
+                new string[] { "4", "5", "6" },
+                new string[] { "1", "2", "3" },
+                new string[] { "±", "0", "." }
+            };
+
+            float kw = 60f;
+            float kh = 28f;
+            float kg = 6f;
+
+            for (int r = 0; r < 4; r++)
+            {
+                float by = 54f - r * (kh + kg);
+                for (int c = 0; c < 3; c++)
+                {
+                    string key = keys[r][c];
+                    float bx = -kw - kg + c * (kw + kg);
+                    CreateStyledButton($"NKey_{key}", numpadPanel.transform, new Vector2(bx, by), new Vector2(kw, kh),
+                        $"<b>{key}</b>", colBtnNormal, colBtnBorder, () => OnNumpadKeyPressed(key));
+                }
+            }
+
+            float bRowY = -80f;
+            float aW = 60f;
+            CreateStyledButton("NKey_Bk", numpadPanel.transform, new Vector2(-kw - kg, bRowY), new Vector2(aW, 28),
+                "<size=9>⌫ Back</size>", colBtnNormal, colBtnBorder, OnNumpadBackspace);
+
+            CreateStyledButton("NKey_Can", numpadPanel.transform, new Vector2(0, bRowY), new Vector2(aW, 28),
+                "<size=9>Cancel</size>", colBtnNormal, colBtnBorder, () => numpadPanel.SetActive(false));
+
+            CreateStyledButton("NKey_App", numpadPanel.transform, new Vector2(kw + kg, bRowY), new Vector2(aW, 28),
+                "<size=9><b>✓ Apply</b></size>", colBlueAction, colBlueAction * 1.3f, OnNumpadApply);
+
+            numpadPanel.SetActive(false);
+        }
+
+        private void OpenNumpadModal(int section, int axis)
+        {
+            numpadTargetSection = section;
+            numpadTargetAxis = axis;
+
+            string sName = section == 0 ? "POSITION" : (section == 1 ? "ROTATION" : "SCALE");
+            string aName = axis == 0 ? "X" : (axis == 1 ? "Y" : "Z");
+            string unit = section == 1 ? "°" : "m";
+
+            if (numpadTitleText != null)
+                numpadTitleText.text = $"<b>ENTER {sName} {aName} ({unit})</b>";
+
+            CADObject selected = CADManagerHub.Instance?.SelectionManager?.SelectedObject;
+            float currentVal = 0;
+            if (selected != null)
+            {
+                if (section == 0) currentVal = (axis == 0) ? selected.transform.localPosition.x : (axis == 1) ? selected.transform.localPosition.y : selected.transform.localPosition.z;
+                else if (section == 1) currentVal = (axis == 0) ? selected.transform.localEulerAngles.x : (axis == 1) ? selected.transform.localEulerAngles.y : selected.transform.localEulerAngles.z;
+                else if (section == 2) currentVal = (axis == 0) ? selected.transform.localScale.x : (axis == 1) ? selected.transform.localScale.y : selected.transform.localScale.z;
+            }
+
+            numpadCurrentInput = $"{currentVal:F3}";
+            if (numpadDisplayText != null) numpadDisplayText.text = numpadCurrentInput;
+
+            numpadPanel.SetActive(true);
+        }
+
+        private void OnNumpadKeyPressed(string key)
+        {
+            if (key == "±")
+            {
+                if (numpadCurrentInput.StartsWith("-"))
+                    numpadCurrentInput = numpadCurrentInput.Substring(1);
+                else
+                    numpadCurrentInput = "-" + numpadCurrentInput;
+            }
+            else if (key == ".")
+            {
+                if (!numpadCurrentInput.Contains("."))
+                    numpadCurrentInput += ".";
+            }
+            else
+            {
+                if (numpadCurrentInput == "0")
+                    numpadCurrentInput = key;
+                else
+                    numpadCurrentInput += key;
+            }
+
+            if (numpadDisplayText != null) numpadDisplayText.text = numpadCurrentInput;
+        }
+
+        private void OnNumpadBackspace()
+        {
+            if (numpadCurrentInput.Length > 1)
+                numpadCurrentInput = numpadCurrentInput.Substring(0, numpadCurrentInput.Length - 1);
+            else
+                numpadCurrentInput = "0";
+
+            if (numpadDisplayText != null) numpadDisplayText.text = numpadCurrentInput;
+        }
+
+        private void OnNumpadApply()
+        {
+            if (float.TryParse(numpadCurrentInput, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float val))
+            {
+                if (numpadTargetSection == 0)
+                    CADManagerHub.Instance?.SetSelectedPositionValue(numpadTargetAxis, val);
+                else if (numpadTargetSection == 1)
+                    CADManagerHub.Instance?.SetSelectedRotationValue(numpadTargetAxis, val);
+                else if (numpadTargetSection == 2)
+                    CADManagerHub.Instance?.SetSelectedScaleValue(numpadTargetAxis, Mathf.Max(0.005f, val));
+            }
+
+            numpadPanel.SetActive(false);
+        }
+
+        #endregion
+
+        // ════════════════════════════════════════════════════════
+        //  FACTORY HELPERS
+        // ════════════════════════════════════════════════════════
+
+        #region Factory Helpers
+
+        private GameObject CreateCardPanel(string name, Transform parent, Vector2 pos, Vector2 size, string title, bool showChevron = false)
         {
             GameObject card = CreateUIPanel(name, parent, pos, size, colCardBg);
 
-            // Header bar
-            GameObject header = CreateUIPanel("Header", card.transform, new Vector2(0, size.y * 0.5f - 20), new Vector2(size.x - 4, 38), colCardHeader);
+            float bw = 1.5f;
+            CreateUIPanel("BdrT", card.transform, new Vector2(0, size.y * 0.5f - bw * 0.5f), new Vector2(size.x, bw), colCardBorderGlow);
+            CreateUIPanel("BdrB", card.transform, new Vector2(0, -size.y * 0.5f + bw * 0.5f), new Vector2(size.x, bw), colCardBorderGlow);
+            CreateUIPanel("BdrL", card.transform, new Vector2(-size.x * 0.5f + bw * 0.5f, 0), new Vector2(bw, size.y), colCardBorderGlow);
+            CreateUIPanel("BdrR", card.transform, new Vector2(size.x * 0.5f - bw * 0.5f, 0), new Vector2(bw, size.y), colCardBorderGlow);
 
-            // Title
-            CreateTMPText("Title", header.transform, $"<b>{title}</b>", 13, TextAlignmentOptions.Left, colTextLight, new Vector2(-size.x * 0.5f + 55, 0), new Vector2(size.x - 40, 30));
+            float headerY = size.y * 0.5f - 14f;
+            CreateTMPText("Title", card.transform, $"<b>{title}</b>", 10.5f, TextAlignmentOptions.Left, colTextLight,
+                new Vector2(-size.x * 0.5f + 12f + (size.x - 30f) * 0.5f, headerY), new Vector2(size.x - 30f, 20f));
 
-            // Down chevron ▾
-            CreateTMPText("Chevron", header.transform, "▾", 14, TextAlignmentOptions.Right, colTextMuted, new Vector2(size.x * 0.5f - 25, 0), new Vector2(30, 30));
+            if (showChevron)
+            {
+                CreateTMPText("Chevron", card.transform, ">", 10, TextAlignmentOptions.Right, colTextMuted,
+                    new Vector2(size.x * 0.5f - 14f, headerY), new Vector2(16, 20));
+            }
+
+            CreateUIPanel("Sep", card.transform, new Vector2(0, headerY - 12f), new Vector2(size.x - 12f, 1), new Color(0.12f, 0.18f, 0.28f, 0.6f));
 
             return card;
         }
 
-        private Slider CreateColorSliderRow(Transform parent, string axisLabel, Color indicatorCol, Vector2 pos, out TextMeshProUGUI valText, Action<float> onValueChanged)
-        {
-            GameObject row = new GameObject("SliderRow_" + axisLabel);
-            row.transform.SetParent(parent, false);
-            RectTransform rowRect = row.AddComponent<RectTransform>();
-            rowRect.anchoredPosition = pos;
-            rowRect.sizeDelta = new Vector2(210, 36);
-
-            // Axis letter + Circle indicator
-            CreateTMPText("AxisLetter", row.transform, axisLabel, 13, TextAlignmentOptions.Left, colTextMuted, new Vector2(-92, 0), new Vector2(15, 30));
-            GameObject dot = CreateUIPanel("Dot", row.transform, new Vector2(-75, 0), new Vector2(16, 16), indicatorCol);
-
-            // Slider Component
-            GameObject sliderObj = new GameObject("Slider");
-            sliderObj.transform.SetParent(row.transform, false);
-            RectTransform sRect = sliderObj.AddComponent<RectTransform>();
-            sRect.anchoredPosition = new Vector2(5, 0);
-            sRect.sizeDelta = new Vector2(100, 20);
-
-            Slider slider = sliderObj.AddComponent<Slider>();
-            slider.minValue = 0;
-            slider.maxValue = 255;
-            slider.value = 255;
-
-            // Background track
-            GameObject bgTrack = CreateUIPanel("Background", sliderObj.transform, Vector2.zero, new Vector2(100, 6), colInsetField);
-            // Fill track
-            GameObject fill = CreateUIPanel("Fill", sliderObj.transform, Vector2.zero, new Vector2(100, 6), indicatorCol);
-            slider.fillRect = fill.GetComponent<RectTransform>();
-
-            // Handle
-            GameObject handle = CreateUIPanel("Handle", sliderObj.transform, Vector2.zero, new Vector2(14, 14), Color.white);
-            slider.handleRect = handle.GetComponent<RectTransform>();
-            slider.targetGraphic = handle.GetComponent<Image>();
-
-            // Value text
-            valText = CreateTMPText("Val", row.transform, "255", 12, TextAlignmentOptions.Right, colTextLight, new Vector2(85, 0), new Vector2(35, 30));
-
-            TextMeshProUGUI capturedValText = valText;
-            slider.onValueChanged.AddListener(v =>
-            {
-                capturedValText.text = Mathf.RoundToInt(v).ToString();
-                onValueChanged?.Invoke(v);
-            });
-
-            return slider;
-        }
-
-        private TextMeshProUGUI CreateStepperRow(Transform parent, string axis, string defaultVal, Vector2 pos, Action onMinus, Action onPlus)
-        {
-            GameObject row = new GameObject("StepperRow_" + axis);
-            row.transform.SetParent(parent, false);
-            RectTransform rowRect = row.AddComponent<RectTransform>();
-            rowRect.anchoredPosition = pos;
-            rowRect.sizeDelta = new Vector2(190, 36);
-
-            // Axis Label
-            CreateTMPText("Axis", row.transform, $"<b>{axis}</b>", 13, TextAlignmentOptions.Left, colTextMuted, new Vector2(-80, 0), new Vector2(15, 30));
-
-            // Minus Button [ - ]
-            CreateButtonWithLabel("Btn_Minus", row.transform, new Vector2(-50, 0), new Vector2(28, 28), "-", onMinus);
-
-            // Value Box
-            GameObject valBox = CreateUIPanel("ValBox", row.transform, new Vector2(5, 0), new Vector2(65, 28), colInsetField);
-            TextMeshProUGUI valText = CreateTMPText("Val", valBox.transform, defaultVal, 12, TextAlignmentOptions.Center, colTextLight, Vector2.zero, new Vector2(65, 28));
-
-            // Plus Button [ + ]
-            CreateButtonWithLabel("Btn_Plus", row.transform, new Vector2(60, 0), new Vector2(28, 28), "+", onPlus);
-
-            return valText;
-        }
-
-        private void CreateTextureSlotRow(Transform parent, string slotName, Vector2 pos)
-        {
-            GameObject row = new GameObject("TexRow_" + slotName);
-            row.transform.SetParent(parent, false);
-            RectTransform rowRect = row.AddComponent<RectTransform>();
-            rowRect.anchoredPosition = pos;
-            rowRect.sizeDelta = new Vector2(210, 36);
-
-            CreateTMPText("SlotLabel", row.transform, $"<size=11>{slotName}</size>", 12, TextAlignmentOptions.Left, colTextMuted, new Vector2(-75, 0), new Vector2(45, 30));
-
-            // Slider
-            GameObject sObj = CreateUIPanel("SliderFake", row.transform, new Vector2(-15, 0), new Vector2(60, 6), colInsetField);
-            CreateUIPanel("Thumb", sObj.transform, new Vector2(-10, 0), new Vector2(12, 12), colTextLight);
-
-            // Checkerboard Preview Box
-            CreateUIPanel("Preview", row.transform, new Vector2(40, 0), new Vector2(24, 24), new Color(0.3f, 0.35f, 0.45f, 1f));
-
-            // Folder Icon Button
-            CreateButtonWithLabel("Btn_Browse", row.transform, new Vector2(75, 0), new Vector2(24, 24), "📁", () =>
-            {
-                CADManagerHub.Instance?.EmitStatus($"Browsing textures for {slotName}");
-            });
-        }
-
-        private void CreateParamRow(Transform parent, string label, string ax1, string val1, string ax2, string val2, Vector2 pos)
-        {
-            GameObject row = new GameObject("ParamRow_" + label);
-            row.transform.SetParent(parent, false);
-            RectTransform rowRect = row.AddComponent<RectTransform>();
-            rowRect.anchoredPosition = pos;
-            rowRect.sizeDelta = new Vector2(210, 36);
-
-            CreateTMPText("Label", row.transform, $"<size=11>{label}</size>", 12, TextAlignmentOptions.Left, colTextMuted, new Vector2(-75, 0), new Vector2(45, 30));
-
-            // Ax1
-            CreateTMPText("Ax1", row.transform, $"<size=11><color=#8899aa>{ax1}</color></size>", 12, TextAlignmentOptions.Center, colTextMuted, new Vector2(-25, 0), new Vector2(15, 30));
-            GameObject box1 = CreateUIPanel("Box1", row.transform, new Vector2(10, 0), new Vector2(45, 24), colInsetField);
-            CreateTMPText("V1", box1.transform, val1, 11, TextAlignmentOptions.Center, colTextLight, Vector2.zero, new Vector2(45, 24));
-
-            // Ax2
-            CreateTMPText("Ax2", row.transform, $"<size=11><color=#8899aa>{ax2}</color></size>", 12, TextAlignmentOptions.Center, colTextMuted, new Vector2(42, 0), new Vector2(15, 30));
-            GameObject box2 = CreateUIPanel("Box2", row.transform, new Vector2(75, 0), new Vector2(45, 24), colInsetField);
-            CreateTMPText("V2", box2.transform, val2, 11, TextAlignmentOptions.Center, colTextLight, Vector2.zero, new Vector2(45, 24));
-        }
-
-        private void CreateColumnHeader(Transform parent, string text, Vector2 pos)
-        {
-            CreateTMPText("ColHeader_" + text, parent, $"<size=11><b>{text}</b></size>", 12, TextAlignmentOptions.Center, colTextMuted, pos, new Vector2(140, 20));
-        }
-
-        private Button CreateDockButton(string name, Transform parent, Vector2 pos, Vector2 size, string text, Action onClick)
-        {
-            return CreateStyledButton(name, parent, pos, size, text, colBtnNormal, colBtnBorder, onClick);
-        }
-
-        private Button CreateColoredButton(string name, Transform parent, Vector2 pos, Vector2 size, string text, Color color, Action onClick)
-        {
-            return CreateStyledButton(name, parent, pos, size, text, color, color * 1.2f, onClick);
-        }
-
-        private Button CreateButtonWithLabel(string name, Transform parent, Vector2 pos, Vector2 size, string text, Action onClick)
-        {
-            return CreateStyledButton(name, parent, pos, size, text, colBtnNormal, colBtnBorder, onClick);
-        }
-
-        private Button CreateSwatchButton(string name, Transform parent, Vector2 pos, Vector2 size, Color swatchColor, Action onClick)
+        private GameObject CreateSwatchButton(string name, Transform parent, Vector2 pos, Vector2 size, Color swatchColor, bool active, Action onClick)
         {
             GameObject obj = new GameObject(name);
             obj.transform.SetParent(parent, false);
-
             RectTransform rect = obj.AddComponent<RectTransform>();
             rect.anchoredPosition = pos;
             rect.sizeDelta = size;
@@ -637,16 +1343,93 @@ namespace VRCAD.UI
             img.color = swatchColor;
 
             Button btn = obj.AddComponent<Button>();
+            ColorBlock cb = btn.colors;
+            cb.normalColor = swatchColor;
+            cb.highlightedColor = Color.Lerp(swatchColor, Color.white, 0.25f);
+            cb.pressedColor = Color.white;
+            btn.colors = cb;
             if (onClick != null) btn.onClick.AddListener(() => onClick());
 
+            GameObject outObj = CreateUIPanel("Outline", obj.transform, Vector2.zero, new Vector2(size.x + 4, size.y + 4), active ? Color.white : Color.clear);
+            outObj.transform.SetAsFirstSibling();
+
+            return obj;
+        }
+
+        private Button CreateToggleBtn(string name, Transform parent, Vector2 pos, Vector2 size, string label, bool active, Action onClick)
+        {
+            Color bg = active ? colCyanActive : colBtnNormal;
+            GameObject obj = new GameObject(name);
+            obj.transform.SetParent(parent, false);
+            RectTransform rect = obj.AddComponent<RectTransform>();
+            rect.anchoredPosition = pos;
+            rect.sizeDelta = size;
+
+            Image img = obj.AddComponent<Image>();
+            img.color = bg;
+
+            Button btn = obj.AddComponent<Button>();
+            ColorBlock cb = btn.colors;
+            cb.normalColor = bg;
+            cb.highlightedColor = bg * 1.25f;
+            cb.pressedColor = colCyanActive;
+            btn.colors = cb;
+            if (onClick != null) btn.onClick.AddListener(() => onClick());
+
+            CreateTMPText("Lbl", obj.transform, $"<size=9><b>{label}</b></size>", 9, TextAlignmentOptions.Center, colTextLight, Vector2.zero, size);
             return btn;
         }
 
-        private Button CreateStyledButton(string name, Transform parent, Vector2 pos, Vector2 size, string text, Color bgColor, Color borderColor, Action onClick)
+        private Button CreateAxisLockBtn(string name, Transform parent, Vector2 pos, Vector2 size, string label, Color axisColor, Action onClick)
         {
             GameObject obj = new GameObject(name);
             obj.transform.SetParent(parent, false);
+            RectTransform rect = obj.AddComponent<RectTransform>();
+            rect.anchoredPosition = pos;
+            rect.sizeDelta = size;
 
+            Image img = obj.AddComponent<Image>();
+            img.color = axisColor;
+
+            Button btn = obj.AddComponent<Button>();
+            ColorBlock cb = btn.colors;
+            cb.normalColor = axisColor;
+            cb.highlightedColor = axisColor * 1.3f;
+            cb.pressedColor = Color.white;
+            btn.colors = cb;
+            if (onClick != null) btn.onClick.AddListener(() => onClick());
+
+            CreateTMPText("Lbl", obj.transform, $"<b>{label}</b>", 12, TextAlignmentOptions.Center, Color.white, Vector2.zero, size);
+            return btn;
+        }
+
+        private void CreateIconBtn(string name, Transform parent, Vector2 pos, Vector2 size, string icon, string label, Action onClick)
+        {
+            GameObject obj = new GameObject(name);
+            obj.transform.SetParent(parent, false);
+            RectTransform rect = obj.AddComponent<RectTransform>();
+            rect.anchoredPosition = pos;
+            rect.sizeDelta = size;
+
+            Image img = obj.AddComponent<Image>();
+            img.color = colBtnNormal;
+
+            Button btn = obj.AddComponent<Button>();
+            ColorBlock cb = btn.colors;
+            cb.normalColor = colBtnNormal;
+            cb.highlightedColor = colBtnHover;
+            cb.pressedColor = colCyanActive;
+            btn.colors = cb;
+            if (onClick != null) btn.onClick.AddListener(() => onClick());
+
+            CreateTMPText("Icon", obj.transform, icon, 15, TextAlignmentOptions.Center, colTextLight, new Vector2(0, 6), new Vector2(size.x, 22));
+            CreateTMPText("Lbl", obj.transform, $"<size=8>{label}</size>", 8, TextAlignmentOptions.Center, colTextMuted, new Vector2(0, -13), new Vector2(size.x, 14));
+        }
+
+        private Button CreateIconBtnColored(string name, Transform parent, Vector2 pos, Vector2 size, string icon, string label, Color bgColor, Action onClick)
+        {
+            GameObject obj = new GameObject(name);
+            obj.transform.SetParent(parent, false);
             RectTransform rect = obj.AddComponent<RectTransform>();
             rect.anchoredPosition = pos;
             rect.sizeDelta = size;
@@ -657,37 +1440,51 @@ namespace VRCAD.UI
             Button btn = obj.AddComponent<Button>();
             ColorBlock cb = btn.colors;
             cb.normalColor = bgColor;
-            cb.highlightedColor = bgColor * 1.3f;
+            cb.highlightedColor = bgColor * 1.25f;
             cb.pressedColor = colCyanActive;
-            cb.selectedColor = bgColor * 1.3f;
             btn.colors = cb;
+            if (onClick != null) btn.onClick.AddListener(() => onClick());
 
-            if (onClick != null)
-            {
-                btn.onClick.AddListener(() => onClick());
-            }
-
-            // Text
-            TextMeshProUGUI tmp = CreateTMPText("Label", obj.transform, text, 13, TextAlignmentOptions.Center, colTextLight);
-            RectTransform tmpRect = tmp.GetComponent<RectTransform>();
-            tmpRect.anchoredPosition = Vector2.zero;
-            tmpRect.sizeDelta = size;
+            CreateTMPText("Icon", obj.transform, icon, 15, TextAlignmentOptions.Center, colTextLight, new Vector2(0, 6), new Vector2(size.x, 22));
+            CreateTMPText("Lbl", obj.transform, $"<size=8>{label}</size>", 8, TextAlignmentOptions.Center, colTextLight, new Vector2(0, -13), new Vector2(size.x, 14));
 
             return btn;
         }
 
-        private GameObject CreateUIPanel(string name, Transform parent, Vector2 pos, Vector2 size, Color color)
+        private Button CreateStyledButton(string name, Transform parent, Vector2 pos, Vector2 size, string text, Color bgColor, Color borderColor, Action onClick)
         {
             GameObject obj = new GameObject(name);
             obj.transform.SetParent(parent, false);
+            RectTransform rect = obj.AddComponent<RectTransform>();
+            rect.anchoredPosition = pos;
+            rect.sizeDelta = size;
 
+            Image img = obj.AddComponent<Image>();
+            img.color = bgColor;
+
+            Button btn = obj.AddComponent<Button>();
+            ColorBlock cb = btn.colors;
+            cb.normalColor = bgColor;
+            cb.highlightedColor = bgColor * 1.25f;
+            cb.pressedColor = colCyanActive;
+            btn.colors = cb;
+            if (onClick != null) btn.onClick.AddListener(() => onClick());
+
+            CreateTMPText("Lbl", obj.transform, text, 10, TextAlignmentOptions.Center, colTextLight, Vector2.zero, size);
+            return btn;
+        }
+
+        private GameObject CreateUIPanel(string name, Transform parent, Vector2 pos, Vector2 size, Color color, bool raycastTarget = false)
+        {
+            GameObject obj = new GameObject(name);
+            obj.transform.SetParent(parent, false);
             RectTransform rect = obj.AddComponent<RectTransform>();
             rect.anchoredPosition = pos;
             rect.sizeDelta = size;
 
             Image img = obj.AddComponent<Image>();
             img.color = color;
-
+            img.raycastTarget = raycastTarget;
             return obj;
         }
 
@@ -695,7 +1492,6 @@ namespace VRCAD.UI
         {
             GameObject obj = new GameObject(name);
             obj.transform.SetParent(parent, false);
-
             RectTransform rect = obj.AddComponent<RectTransform>();
             rect.anchoredPosition = position ?? Vector2.zero;
             rect.sizeDelta = size ?? new Vector2(100, 30);
@@ -705,63 +1501,96 @@ namespace VRCAD.UI
             tmp.fontSize = fontSize;
             tmp.alignment = alignment;
             tmp.color = color;
-            tmp.enableWordWrapping = true;
-
+            tmp.enableWordWrapping = false;
+            tmp.raycastTarget = false;
             return tmp;
+        }
+
+        private void SetBtnColor(Button btn, Color col)
+        {
+            if (btn == null) return;
+            Image img = btn.GetComponent<Image>();
+            if (img != null) img.color = col;
+            ColorBlock cb = btn.colors;
+            cb.normalColor = col;
+            cb.highlightedColor = col * 1.25f;
+            cb.selectedColor = col;
+            btn.colors = cb;
         }
 
         #endregion
 
-        #region Logic & State Updates
+        // ════════════════════════════════════════════════════════
+        //  STATE LOGIC & EVENT DISPATCHING
+        // ════════════════════════════════════════════════════════
 
-        private void SwitchBottomTab(int index)
+        #region State Logic
+
+        private void SetGridSnap(float value)
         {
-            activeTabIndex = index;
-            for (int i = 0; i < tabLabels.Count; i++)
-            {
-                tabLabels[i].color = (i == index) ? colCyanActive : colTextMuted;
-            }
+            activeGridSnap = value;
+            if (CADManagerHub.Instance?.TransformManager != null)
+                CADManagerHub.Instance.TransformManager.GridSnapIncrement = value;
 
-            if (tabUnderline != null)
-            {
-                float dockW = 1260f;
-                float startTabX = -dockW * 0.5f + 110f;
-                float tabSpacing = 160f;
-                tabUnderline.GetComponent<RectTransform>().anchoredPosition = new Vector2(startTabX + index * tabSpacing, 260 * 0.5f - 36);
-            }
+            string[] labels = { "1mm", "5mm", "10mm", "50mm" };
+            float[] values = { 0.001f, 0.005f, 0.010f, 0.050f };
+            for (int i = 0; i < labels.Length; i++)
+                if (gridSnapButtons.TryGetValue(labels[i], out Button btn))
+                    SetBtnColor(btn, Mathf.Approximately(values[i], value) ? colCyanActive : colBtnNormal);
+
+            CADManagerHub.Instance?.EmitStatus($"Grid Snap: {value * 1000f:F0}mm");
         }
 
-        private void UpdateUniformButtonState()
+        private void SetAngleSnap(float value)
         {
-            if (uniformBtn != null)
-            {
-                ColorBlock cb = uniformBtn.colors;
-                cb.normalColor = uniformScaleEnabled ? new Color(0.00f, 0.45f, 0.85f, 1f) : colBtnNormal;
-                uniformBtn.colors = cb;
-            }
+            activeAngleSnap = value;
+            if (CADManagerHub.Instance?.TransformManager != null)
+                CADManagerHub.Instance.TransformManager.AngleSnapIncrement = value;
+
+            string[] labels = { "5°", "15°", "45°", "90°" };
+            float[] values = { 5f, 15f, 45f, 90f };
+            for (int i = 0; i < labels.Length; i++)
+                if (angleSnapButtons.TryGetValue(labels[i], out Button btn))
+                    SetBtnColor(btn, Mathf.Approximately(values[i], value) ? colCyanActive : colBtnNormal);
+
+            CADManagerHub.Instance?.EmitStatus($"Angle Snap: {value:F0}°");
         }
 
-        private void ApplyColorUpdate()
+        private void ToggleAxisLock(AxisConstraint axis)
         {
-            currentColor = new Color(redVal / 255f, greenVal / 255f, blueVal / 255f, 1f);
-            CADManagerHub.Instance?.SetSelectedColor(currentColor);
+            currentAxisLock = (currentAxisLock == axis) ? AxisConstraint.None : axis;
+
+            if (CADManagerHub.Instance?.TransformManager != null)
+                CADManagerHub.Instance.TransformManager.ActiveConstraint = currentAxisLock;
+
+            string[] ax = { "X", "Y", "Z" };
+            AxisConstraint[] cs = { AxisConstraint.LockX, AxisConstraint.LockY, AxisConstraint.LockZ };
+            Color[] cols = { colAxisRed, colAxisGreen, colAxisBlue };
+            for (int i = 0; i < ax.Length; i++)
+                if (axisLockButtons.TryGetValue(ax[i], out Button btn))
+                    SetBtnColor(btn, (currentAxisLock == cs[i]) ? cols[i] : cols[i] * 0.45f);
+
+            CADManagerHub.Instance?.EmitStatus($"Axis Lock: {currentAxisLock}");
+        }
+
+        private void SetSelectionMode(SelectionMode mode)
+        {
+            currentSelectionMode = mode;
+            CADManagerHub.Instance?.SetSelectionMode(mode);
+
+            string[] names = { "Object", "Face", "Edge", "Vertex" };
+            SelectionMode[] modes = { SelectionMode.Object, SelectionMode.Face, SelectionMode.Edge, SelectionMode.Vertex };
+            for (int i = 0; i < names.Length; i++)
+                if (selectionModeButtons.TryGetValue(names[i], out Button btn))
+                    SetBtnColor(btn, modes[i] == mode ? colCyanActive : colBtnNormal);
+
+            if (selectionModeText != null) selectionModeText.text = $"<b>{mode}</b>";
         }
 
         private void SetColorFromPreset(Color c)
         {
-            redVal = c.r * 255f;
-            greenVal = c.g * 255f;
-            blueVal = c.b * 255f;
-
-            if (sliderR != null) sliderR.value = redVal;
-            if (sliderG != null) sliderG.value = greenVal;
-            if (sliderB != null) sliderB.value = blueVal;
-
-            if (colRValText != null) colRValText.text = Mathf.RoundToInt(redVal).ToString();
-            if (colGValText != null) colGValText.text = Mathf.RoundToInt(greenVal).ToString();
-            if (colBValText != null) colBValText.text = Mathf.RoundToInt(blueVal).ToString();
-
-            ApplyColorUpdate();
+            currentColor = c;
+            CADManagerHub.Instance?.SetSelectedColor(c);
         }
 
         private void UpdateLiveTransformReadouts()
@@ -769,21 +1598,19 @@ namespace VRCAD.UI
             CADObject selected = CADManagerHub.Instance?.SelectionManager?.SelectedObject;
             if (selected != null)
             {
-                Vector3 pos = selected.transform.localPosition;
-                Vector3 rot = selected.transform.localEulerAngles;
-                Vector3 scale = selected.transform.localScale;
+                Vector3 p = selected.transform.localPosition;
+                Vector3 r = selected.transform.localEulerAngles;
+                Vector3 s = selected.transform.localScale;
 
-                if (posXText != null) posXText.text = $"{pos.x:F3}";
-                if (posYText != null) posYText.text = $"{pos.y:F3}";
-                if (posZText != null) posZText.text = $"{pos.z:F3}";
-
-                if (rotXText != null) rotXText.text = $"{rot.x:F2}°";
-                if (rotYText != null) rotYText.text = $"{rot.y:F2}°";
-                if (rotZText != null) rotZText.text = $"{rot.z:F2}°";
-
-                if (scaleXText != null) scaleXText.text = $"{scale.x:F3}";
-                if (scaleYText != null) scaleYText.text = $"{scale.y:F3}";
-                if (scaleZText != null) scaleZText.text = $"{scale.z:F3}";
+                if (posXText != null) posXText.text = $"{p.x:F3}";
+                if (posYText != null) posYText.text = $"{p.y:F3}";
+                if (posZText != null) posZText.text = $"{p.z:F3}";
+                if (rotXText != null) rotXText.text = $"{r.x:F1}";
+                if (rotYText != null) rotYText.text = $"{r.y:F1}";
+                if (rotZText != null) rotZText.text = $"{r.z:F1}";
+                if (scaleXText != null) scaleXText.text = $"{s.x:F3}";
+                if (scaleYText != null) scaleYText.text = $"{s.y:F3}";
+                if (scaleZText != null) scaleZText.text = $"{s.z:F3}";
             }
         }
 
@@ -792,6 +1619,7 @@ namespace VRCAD.UI
             if (CADManagerHub.Instance != null)
             {
                 CADManagerHub.Instance.SelectionUpdated += OnSelectionUpdated;
+                CADManagerHub.Instance.StatusMessageEmitted += OnStatusMessage;
             }
         }
 
@@ -799,19 +1627,14 @@ namespace VRCAD.UI
         {
             if (selected != null)
             {
-                Color c = selected.GetColor();
-                redVal = c.r * 255f;
-                greenVal = c.g * 255f;
-                blueVal = c.b * 255f;
-
-                if (sliderR != null) sliderR.SetValueWithoutNotify(redVal);
-                if (sliderG != null) sliderG.SetValueWithoutNotify(greenVal);
-                if (sliderB != null) sliderB.SetValueWithoutNotify(blueVal);
-
-                if (colRValText != null) colRValText.text = Mathf.RoundToInt(redVal).ToString();
-                if (colGValText != null) colGValText.text = Mathf.RoundToInt(greenVal).ToString();
-                if (colBValText != null) colBValText.text = Mathf.RoundToInt(blueVal).ToString();
+                currentColor = selected.GetColor();
+                UpdateSwatchOutlines();
             }
+        }
+
+        private void OnStatusMessage(string message)
+        {
+            if (statusText != null) statusText.text = $"<size=11>{message}</size>";
         }
 
         private void OnDestroy()
@@ -819,6 +1642,7 @@ namespace VRCAD.UI
             if (CADManagerHub.Instance != null)
             {
                 CADManagerHub.Instance.SelectionUpdated -= OnSelectionUpdated;
+                CADManagerHub.Instance.StatusMessageEmitted -= OnStatusMessage;
             }
         }
 
