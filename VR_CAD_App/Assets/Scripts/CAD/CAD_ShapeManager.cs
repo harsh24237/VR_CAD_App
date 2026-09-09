@@ -37,6 +37,9 @@ namespace VRCAD.Core
             cadObj.Dimensions = scale;
             cadObj.SetMesh(mesh);
 
+            // Attach real-time dimension labels and wireframe bounding box.
+            obj.AddComponent<DimensionVisualizer>();
+
             registeredObjects.Add(cadObj);
             CADManagerHub.Instance?.OnShapeCreated(cadObj);
 
@@ -166,6 +169,7 @@ namespace VRCAD.Core
 
         public static Mesh CreateCylinderMesh(float radius, float height, int segments)
         {
+            segments = Mathf.Max(3, segments);
             Mesh mesh = new Mesh { name = "Procedural_Cylinder" };
             List<Vector3> verts = new List<Vector3>();
             List<Vector3> norms = new List<Vector3>();
@@ -263,6 +267,8 @@ namespace VRCAD.Core
 
         public static Mesh CreateSphereMesh(float radius, int longitudeSegments, int latitudeSegments)
         {
+            longitudeSegments = Mathf.Max(3, longitudeSegments);
+            latitudeSegments = Mathf.Max(2, latitudeSegments);
             Mesh mesh = new Mesh { name = "Procedural_Sphere" };
             List<Vector3> verts = new List<Vector3>();
             List<Vector3> norms = new List<Vector3>();
@@ -315,6 +321,7 @@ namespace VRCAD.Core
 
         public static Mesh CreateConeMesh(float radius, float height, int segments)
         {
+            segments = Mathf.Max(3, segments);
             Mesh mesh = new Mesh { name = "Procedural_Cone" };
             List<Vector3> verts = new List<Vector3>();
             List<Vector3> norms = new List<Vector3>();
@@ -449,6 +456,8 @@ namespace VRCAD.Core
 
         public static Mesh CreateTorusMesh(float mainRadius, float tubeRadius, int mainSegments, int tubeSegments)
         {
+            mainSegments = Mathf.Max(3, mainSegments);
+            tubeSegments = Mathf.Max(3, tubeSegments);
             Mesh mesh = new Mesh { name = "Procedural_Torus" };
             List<Vector3> verts = new List<Vector3>();
             List<Vector3> norms = new List<Vector3>();

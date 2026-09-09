@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.XR.Interaction.Toolkit;
 
 namespace VRCAD.Core
 {
@@ -13,28 +14,50 @@ namespace VRCAD.Core
         [SerializeField] private int starCount = 750;
 
         [Header("Grid Floor (Horizontal work plane in front of UI)")]
-        [SerializeField] private Vector3 gridCenter = new Vector3(0, 0.45f, 1.35f);
-        [SerializeField] private float gridWidth = 4.2f;
-        [SerializeField] private float gridDepth = 2.6f;
-        [SerializeField] private int gridLinesX = 32;
-        [SerializeField] private int gridLinesZ = 20;
-        [SerializeField] private Color gridLineColor = new Color(0.00f, 0.65f, 0.90f, 0.35f);
-        [SerializeField] private Color gridBorderColor = new Color(0.00f, 0.85f, 1.00f, 0.70f);
-        [SerializeField] private float gridLineWidth = 0.004f;
-        [SerializeField] private float gridBorderWidth = 0.008f;
+        [SerializeField] private Vector3 gridCenter = new Vector3(0, 0.78f, 1.05f);
+        [SerializeField] private float gridWidth = 1.40f;
+        [SerializeField] private float gridDepth = 0.90f;
+        [SerializeField] private int gridLinesX = 28;
+        [SerializeField] private int gridLinesZ = 18;
+        [SerializeField] private Color gridLineColor = new Color(0.12f, 0.55f, 0.90f, 0.40f);
+        [SerializeField] private Color gridBorderColor = new Color(0.85f, 0.95f, 1.00f, 0.80f);
+        [SerializeField] private float gridLineWidth = 0.0035f;
+        [SerializeField] private float gridBorderWidth = 0.007f;
 
-        [Header("Grid Glow")]
-        [SerializeField] private Color gridGlowColor = new Color(0.00f, 0.50f, 0.80f, 0.06f);
+        [Header("Grid Glow / Mat Surface")]
+        [SerializeField] private Color gridGlowColor = new Color(0.02f, 0.14f, 0.38f, 0.82f);
+
+        [Header("Grid Interaction (VR & PC)")]
+        [Tooltip("Speed for keyboard nudging of grid position (m/s).")]
+        [SerializeField] private float gridKeyMoveSpeed = 1.0f;
+
+        [Tooltip("Speed for keyboard rotation of grid (°/s).")]
+        [SerializeField] private float gridKeyRotateSpeed = 45.0f;
+
+        public static CAD_EnvironmentManager Instance { get; private set; }
 
         public Transform GridFloorTransform { get; private set; }
         public Vector3 GridCenter => gridCenter;
         public float GridSurfaceY => gridCenter.y;
 
         private GameObject environmentRoot;
+        private GameObject gridRootObj; // cached for keyboard controls
 
         private void Awake()
         {
+            if (Instance == null)
+            {
+                Instance = this;
+            }
             BuildEnvironment();
+        }
+
+        private void OnDestroy()
+        {
+            if (Instance == this)
+            {
+                Instance = null;
+            }
         }
 
         private void Start()
@@ -50,6 +73,11 @@ namespace VRCAD.Core
                 Camera.main.clearFlags = CameraClearFlags.SolidColor;
                 Camera.main.backgroundColor = spaceBackgroundColor;
             }
+        }
+
+        private void Update()
+        {
+            HandleGridKeyboardControls();
         }
 
         private void BuildEnvironment()
@@ -129,17 +157,67 @@ namespace VRCAD.Core
             rimLight.intensity = 0.35f;
             rimLight.shadows = LightShadows.None;
 
-            // 4. CAD Workspace Reflection Probe for metallic & glossy materials
+            // 4. Ambient Studio Lighting for PBR Materials
+            RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Trilight;
+            RenderSettings.ambientSkyColor = new Color(0.40f, 0.50f, 0.65f, 1f);
+            RenderSettings.ambientEquatorColor = new Color(0.25f, 0.35f, 0.48f, 1f);
+            RenderSettings.ambientGroundColor = new Color(0.12f, 0.16f, 0.24f, 1f);
+            RenderSettings.ambientIntensity = 1.0f;
+            RenderSettings.reflectionIntensity = 1.25f;
+
+            // 5. CAD Workspace Reflection Probe with Studio Cubemap for metallic & glossy materials
+            Cubemap studioCube = CreateStudioCubemap();
+            RenderSettings.customReflection = studioCube;
+
             GameObject probeObj = new GameObject("CAD_ReflectionProbe");
             probeObj.transform.SetParent(lightsRoot.transform);
             probeObj.transform.position = new Vector3(gridCenter.x, gridCenter.y + 0.8f, gridCenter.z);
             ReflectionProbe probe = probeObj.AddComponent<ReflectionProbe>();
-            probe.mode = UnityEngine.Rendering.ReflectionProbeMode.Realtime;
-            probe.refreshMode = UnityEngine.Rendering.ReflectionProbeRefreshMode.ViaScripting;
-            probe.size = new Vector3(8f, 6f, 8f);
-            probe.intensity = 0.85f;
-            probe.clearFlags = UnityEngine.Rendering.ReflectionProbeClearFlags.SolidColor;
-            probe.backgroundColor = new Color(0.04f, 0.06f, 0.10f, 1f);
+            probe.mode = UnityEngine.Rendering.ReflectionProbeMode.Custom;
+            probe.customBakedTexture = studioCube;
+            probe.size = new Vector3(10f, 8f, 10f);
+            probe.intensity = 1.25f;
+        }
+
+        private Cubemap CreateStudioCubemap()
+        {
+            int size = 64;
+            Cubemap cube = new Cubemap(size, TextureFormat.RGBA32, false);
+            cube.name = "CAD_StudioEnvironmentCubemap";
+            Color topLight = new Color(0.95f, 0.98f, 1.0f, 1f);
+            Color skyGrad = new Color(0.35f, 0.50f, 0.70f, 1f);
+            Color horizonGrad = new Color(0.18f, 0.28f, 0.42f, 1f);
+            Color groundCol = new Color(0.06f, 0.09f, 0.15f, 1f);
+
+            for (int face = 0; face < 6; face++)
+            {
+                CubemapFace cFace = (CubemapFace)face;
+                Color[] pixels = new Color[size * size];
+                for (int y = 0; y < size; y++)
+                {
+                    float v = (float)y / (size - 1);
+                    for (int x = 0; x < size; x++)
+                    {
+                        float u = (float)x / (size - 1);
+                        if (cFace == CubemapFace.PositiveY)
+                        {
+                            float dist = Vector2.Distance(new Vector2(u, v), new Vector2(0.5f, 0.5f));
+                            pixels[y * size + x] = Color.Lerp(topLight, skyGrad, Mathf.Clamp01(dist * 1.5f));
+                        }
+                        else if (cFace == CubemapFace.NegativeY)
+                        {
+                            pixels[y * size + x] = groundCol;
+                        }
+                        else
+                        {
+                            pixels[y * size + x] = Color.Lerp(horizonGrad, skyGrad, v);
+                        }
+                    }
+                }
+                cube.SetPixels(pixels, cFace);
+            }
+            cube.Apply();
+            return cube;
         }
 
         /// <summary>
@@ -216,6 +294,101 @@ namespace VRCAD.Core
 
             // --- High-tech Corner Accents ---
             BuildCornerAccents(gridRoot.transform, halfW, halfD, lineMat);
+
+            // --- Make Grid Interactable (VR + PC) ---
+            MakeGridInteractable(gridRoot, halfW, halfD);
+        }
+
+        /// <summary>
+        /// Attaches physics, XR interaction, and two-handed grab support to the grid
+        /// so users can freely reposition and rotate it in VR.
+        /// </summary>
+        private void MakeGridInteractable(GameObject gridRoot, float halfW, float halfD)
+        {
+            gridRootObj = gridRoot;
+
+            // ── BoxCollider spanning the grid's surface ──
+            BoxCollider col = gridRoot.AddComponent<BoxCollider>();
+            col.size = new Vector3(gridWidth, 0.02f, gridDepth);
+            col.center = Vector3.zero;
+
+            // ── Kinematic Rigidbody (floating, no gravity) ──
+            Rigidbody rb = gridRoot.AddComponent<Rigidbody>();
+            rb.useGravity = false;
+            rb.isKinematic = true;
+            rb.collisionDetectionMode = CollisionDetectionMode.ContinuousSpeculative;
+
+            // ── XRGrabInteractable ──
+            XRGrabInteractable grab = gridRoot.AddComponent<XRGrabInteractable>();
+            grab.movementType = XRBaseInteractable.MovementType.VelocityTracking;
+            grab.throwOnDetach = false;
+            grab.retainTransformParent = true;
+            grab.useDynamicAttach = true;
+
+            // Allow two-handed interaction: select mode = Multiple so both
+            // controllers can grab simultaneously for repositioning + Y-axis rotation.
+            grab.selectMode = InteractableSelectMode.Multiple;
+
+            // Ensure the grid stays floating after release.
+            grab.selectExited.AddListener((args) =>
+            {
+                rb.useGravity = false;
+                rb.isKinematic = true;
+                rb.velocity = Vector3.zero;
+                rb.angularVelocity = Vector3.zero;
+            });
+        }
+
+        /// <summary>
+        /// PC/Editor keyboard controls for the grid (only active when flycam is on).
+        ///   Shift + Arrow Keys → rotate grid (Pitch = Up/Down, Yaw = Left/Right)
+        ///   Shift + W/A/S/D    → nudge grid position
+        /// </summary>
+        private void HandleGridKeyboardControls()
+        {
+            // Only process when PC flycam is active (no VR headset).
+            if (PlayerLocomotionManager.Instance == null || !PlayerLocomotionManager.Instance.IsFlycamActive)
+                return;
+
+            if (gridRootObj == null) return;
+
+            bool shift = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+            if (!shift) return;
+
+            float dt = Time.deltaTime;
+            Transform gridTr = gridRootObj.transform;
+
+            // ── Rotation: Shift + Arrow Keys ──
+            float rotPitch = 0f; // Up/Down arrows
+            float rotYaw = 0f;   // Left/Right arrows
+            if (Input.GetKey(KeyCode.UpArrow))    rotPitch -= 1f;
+            if (Input.GetKey(KeyCode.DownArrow))  rotPitch += 1f;
+            if (Input.GetKey(KeyCode.LeftArrow))  rotYaw   -= 1f;
+            if (Input.GetKey(KeyCode.RightArrow)) rotYaw   += 1f;
+
+            if (!Mathf.Approximately(rotPitch, 0f) || !Mathf.Approximately(rotYaw, 0f))
+            {
+                gridTr.Rotate(rotPitch * gridKeyRotateSpeed * dt, rotYaw * gridKeyRotateSpeed * dt, 0f, Space.Self);
+            }
+
+            // ── Position: Shift + W/A/S/D ──
+            float moveX = 0f;
+            float moveZ = 0f;
+            if (Input.GetKey(KeyCode.A)) moveX -= 1f;
+            if (Input.GetKey(KeyCode.D)) moveX += 1f;
+            if (Input.GetKey(KeyCode.S)) moveZ -= 1f;
+            if (Input.GetKey(KeyCode.W)) moveZ += 1f;
+
+            if (!Mathf.Approximately(moveX, 0f) || !Mathf.Approximately(moveZ, 0f))
+            {
+                // Move relative to the camera's horizontal orientation for intuitive control.
+                Transform cam = Camera.main != null ? Camera.main.transform : null;
+                Vector3 right = cam != null ? Vector3.ProjectOnPlane(cam.right, Vector3.up).normalized : Vector3.right;
+                Vector3 forward = cam != null ? Vector3.ProjectOnPlane(cam.forward, Vector3.up).normalized : Vector3.forward;
+
+                Vector3 delta = (right * moveX + forward * moveZ) * gridKeyMoveSpeed * dt;
+                gridTr.position += delta;
+            }
         }
 
         private void CreateGridLine(Transform parent, string name, Vector3 start, Vector3 end, Color color, float width, Material mat)

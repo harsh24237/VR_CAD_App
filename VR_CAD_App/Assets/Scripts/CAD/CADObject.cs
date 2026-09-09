@@ -158,92 +158,94 @@ namespace VRCAD.Core
             }
         }
 
-        public void SetColor(Color color)
+        [Header("State Tracking")]
+        [SerializeField] private Color baseColor = new Color(0.18f, 0.45f, 0.95f, 1f);
+        [SerializeField] private float roughness = 0.35f;
+        [SerializeField] private float metallic = 0.10f;
+        [SerializeField] private float opacity = 1.0f;
+
+        public float Roughness => roughness;
+        public float Metallic => metallic;
+        public float Opacity => opacity;
+
+        public void ApplyMaterialSettings()
         {
-            if (defaultMaterial != null)
-            {
-                defaultMaterial.color = color;
-            }
-            if (meshRenderer != null)
-            {
-                meshRenderer.material.color = color;
-            }
+            if (meshRenderer == null) meshRenderer = GetComponent<MeshRenderer>();
+            if (meshRenderer == null) return;
+
+            Material mat = meshRenderer.material;
+            if (mat == null) return;
+
+            Color c = baseColor;
+            c.a = Mathf.Clamp01(opacity);
+            mat.color = c;
+
+            float smoothness = 1f - Mathf.Clamp01(roughness);
+            if (mat.HasProperty("_Glossiness")) mat.SetFloat("_Glossiness", smoothness);
+            if (mat.HasProperty("_Smoothness")) mat.SetFloat("_Smoothness", smoothness);
+            if (mat.HasProperty("_Metallic")) mat.SetFloat("_Metallic", Mathf.Clamp01(metallic));
+
+            ConfigureMaterialTransparency(mat, opacity);
+
             if (wireframeRenderer != null && wireframeRenderer.material != null)
             {
-                wireframeRenderer.material.color = color;
+                wireframeRenderer.material.color = c;
             }
         }
 
-        public void SetMaterialProperties(float roughness, float metallic)
+        public void SetColor(Color color)
         {
-            float smoothness = 1f - Mathf.Clamp01(roughness);
-            if (defaultMaterial != null)
-            {
-                if (defaultMaterial.HasProperty("_Glossiness"))
-                    defaultMaterial.SetFloat("_Glossiness", smoothness);
-                if (defaultMaterial.HasProperty("_Metallic"))
-                    defaultMaterial.SetFloat("_Metallic", metallic);
-                if (defaultMaterial.HasProperty("_Smoothness"))
-                    defaultMaterial.SetFloat("_Smoothness", smoothness);
-            }
-            if (meshRenderer != null && meshRenderer.material != null)
-            {
-                if (meshRenderer.material.HasProperty("_Glossiness"))
-                    meshRenderer.material.SetFloat("_Glossiness", smoothness);
-                if (meshRenderer.material.HasProperty("_Metallic"))
-                    meshRenderer.material.SetFloat("_Metallic", metallic);
-                if (meshRenderer.material.HasProperty("_Smoothness"))
-                    meshRenderer.material.SetFloat("_Smoothness", smoothness);
-            }
+            baseColor = color;
+            ApplyMaterialSettings();
         }
 
-        public void SetOpacity(float opacity)
+        public void SetMaterialProperties(float r, float m)
         {
-            opacity = Mathf.Clamp01(opacity);
-            Color col = GetColor();
-            col.a = opacity;
-
-            if (defaultMaterial != null)
-            {
-                ConfigureMaterialTransparency(defaultMaterial, opacity);
-                defaultMaterial.color = col;
-            }
-            if (meshRenderer != null && meshRenderer.material != null)
-            {
-                ConfigureMaterialTransparency(meshRenderer.material, opacity);
-                meshRenderer.material.color = col;
-            }
+            roughness = Mathf.Clamp01(r);
+            metallic = Mathf.Clamp01(m);
+            ApplyMaterialSettings();
         }
 
-        private void ConfigureMaterialTransparency(Material mat, float opacity)
+        public void SetOpacity(float op)
         {
-            if (opacity < 0.99f)
+            opacity = Mathf.Clamp01(op);
+            ApplyMaterialSettings();
+        }
+
+        private void ConfigureMaterialTransparency(Material mat, float op)
+        {
+            if (op < 0.99f)
             {
-                if (mat.HasProperty("_Mode")) mat.SetFloat("_Mode", 3); // Transparent
+                // Fade mode (Mode 2) allows diffuse and specular to fade smoothly with alpha
+                mat.SetFloat("_Mode", 2f);
                 mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
                 mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
                 mat.SetInt("_ZWrite", 0);
                 mat.DisableKeyword("_ALPHATEST_ON");
                 mat.EnableKeyword("_ALPHABLEND_ON");
                 mat.DisableKeyword("_ALPHAPREMULTIPLY_ON");
-                mat.renderQueue = 3000;
+                mat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
             }
             else
             {
-                if (mat.HasProperty("_Mode")) mat.SetFloat("_Mode", 0); // Opaque
+                mat.SetFloat("_Mode", 0f); // Opaque
                 mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.One);
                 mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.Zero);
                 mat.SetInt("_ZWrite", 1);
+                mat.DisableKeyword("_ALPHATEST_ON");
                 mat.DisableKeyword("_ALPHABLEND_ON");
+                mat.DisableKeyword("_ALPHAPREMULTIPLY_ON");
                 mat.renderQueue = -1;
             }
         }
 
         public void ApplyChromePreset()
         {
-            Color chromeCol = new Color(0.96f, 0.97f, 1.0f, 1.0f);
-            SetColor(chromeCol);
-            SetMaterialProperties(0.02f, 1.0f); // 0.02 roughness (mirror glossiness) + 1.0 metallic
+            baseColor = new Color(0.96f, 0.97f, 1.0f, 1.0f);
+            roughness = 0.02f;
+            metallic = 1.0f;
+            opacity = 1.0f;
+            ApplyMaterialSettings();
 
             if (meshRenderer != null && meshRenderer.material != null)
             {
@@ -253,12 +255,14 @@ namespace VRCAD.Core
             }
         }
 
-        public void ResetMaterialAndEffects(Color baseColor)
+        public void ResetMaterialAndEffects(Color bColor)
         {
-            SetColor(baseColor);
-            SetMaterialProperties(0.35f, 0.10f);
-            SetOpacity(1.0f);
+            baseColor = bColor;
+            roughness = 0.35f;
+            metallic = 0.10f;
+            opacity = 1.0f;
             SetWireframeMode(false);
+            ApplyMaterialSettings();
 
             if (meshRenderer != null && meshRenderer.material != null)
             {

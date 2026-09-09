@@ -56,9 +56,24 @@ namespace VRCAD.Core
 
             // Reconstruct mesh
             List<Vector3> newVerts = new List<Vector3>(verts);
-            List<Vector3> newNorms = new List<Vector3>(normals);
-            List<Vector2> newUvs = new List<Vector2>(uvs);
+            List<Vector3> newNorms = (normals != null && normals.Length == verts.Length)
+                ? new List<Vector3>(normals)
+                : new List<Vector3>(new Vector3[verts.Length]);
             List<int> newTris = new List<int>(tris);
+
+            // Ensure base UVs match vertex count even if originalMesh had no UVs
+            List<Vector2> newUvs = new List<Vector2>(verts.Length);
+            if (uvs != null && uvs.Length == verts.Length)
+            {
+                newUvs.AddRange(uvs);
+            }
+            else
+            {
+                for (int i = 0; i < verts.Length; i++)
+                {
+                    newUvs.Add(new Vector2(verts[i].x, verts[i].z));
+                }
+            }
 
             // Map old vertex index -> new extruded vertex index
             Dictionary<int, int> oldToExtrudedMap = new Dictionary<int, int>();
@@ -67,7 +82,7 @@ namespace VRCAD.Core
                 int newIdx = newVerts.Count;
                 newVerts.Add(verts[vIdx] + offset);
                 newNorms.Add(faceNormal);
-                newUvs.Add(uvs.Length > vIdx ? uvs[vIdx] : Vector2.zero);
+                newUvs.Add(newUvs.Count > vIdx ? newUvs[vIdx] : new Vector2(verts[vIdx].x, verts[vIdx].z));
                 oldToExtrudedMap[vIdx] = newIdx;
             }
 
@@ -104,8 +119,25 @@ namespace VRCAD.Core
                 name = originalMesh.name + "_Extruded"
             };
 
+            if (newVerts.Count > 65535)
+            {
+                extrudedMesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
+            }
+
             extrudedMesh.SetVertices(newVerts);
             extrudedMesh.SetTriangles(newTris, 0);
+
+            // Strict safety guarantee: Ensure newUvs exactly matches newVerts count
+            while (newUvs.Count < newVerts.Count)
+            {
+                int idx = newUvs.Count;
+                newUvs.Add(new Vector2(newVerts[idx].x, newVerts[idx].z));
+            }
+            if (newUvs.Count > newVerts.Count)
+            {
+                newUvs.RemoveRange(newVerts.Count, newUvs.Count - newVerts.Count);
+            }
+
             extrudedMesh.SetUVs(0, newUvs);
             extrudedMesh.RecalculateNormals();
             extrudedMesh.RecalculateBounds();

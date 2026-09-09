@@ -157,6 +157,14 @@ namespace VRCAD.Core
             Mesh modified = new Mesh { name = mesh.name + "_Chamfered" };
             modified.SetVertices(newVerts);
             modified.SetTriangles(newTris, 0);
+
+            Vector2[] modUVs = new Vector2[newVerts.Count];
+            for (int i = 0; i < newVerts.Count; i++)
+            {
+                modUVs[i] = new Vector2(newVerts[i].x, newVerts[i].y);
+            }
+            modified.SetUVs(0, modUVs);
+
             modified.RecalculateNormals();
             modified.RecalculateBounds();
 
@@ -261,6 +269,14 @@ namespace VRCAD.Core
 
             mesh.SetVertices(verts);
             mesh.SetTriangles(tris, 0);
+
+            Vector2[] boxUVs = new Vector2[verts.Count];
+            for (int i = 0; i < verts.Count; i++)
+            {
+                boxUVs[i] = new Vector2(verts[i].x, verts[i].y);
+            }
+            mesh.SetUVs(0, boxUVs);
+
             mesh.RecalculateNormals();
             mesh.RecalculateBounds();
             return mesh;
@@ -347,6 +363,14 @@ namespace VRCAD.Core
 
             mesh.SetVertices(verts);
             mesh.SetTriangles(tris, 0);
+
+            Vector2[] cylUVs = new Vector2[verts.Count];
+            for (int i = 0; i < verts.Count; i++)
+            {
+                cylUVs[i] = new Vector2(verts[i].x, verts[i].z);
+            }
+            mesh.SetUVs(0, cylUVs);
+
             mesh.RecalculateNormals();
             mesh.RecalculateBounds();
             return mesh;

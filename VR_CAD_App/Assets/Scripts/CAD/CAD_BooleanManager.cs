@@ -238,6 +238,14 @@ namespace VRCAD.Core
 
             result.SetVertices(outVerts);
             result.SetTriangles(outTris, 0);
+
+            Vector2[] csgUVs = new Vector2[outVerts.Count];
+            for (int i = 0; i < outVerts.Count; i++)
+            {
+                csgUVs[i] = new Vector2(outVerts[i].x, outVerts[i].z);
+            }
+            result.SetUVs(0, csgUVs);
+
             result.RecalculateNormals();
             result.RecalculateBounds();
             result.RecalculateTangents();
@@ -260,6 +268,14 @@ namespace VRCAD.Core
 
             mesh.SetVertices(verts);
             mesh.SetTriangles(tris, 0);
+
+            Vector2[] combUVs = new Vector2[verts.Count];
+            for (int i = 0; i < verts.Count; i++)
+            {
+                combUVs[i] = new Vector2(verts[i].x, verts[i].z);
+            }
+            mesh.SetUVs(0, combUVs);
+
             mesh.RecalculateNormals();
             mesh.RecalculateBounds();
             return mesh;

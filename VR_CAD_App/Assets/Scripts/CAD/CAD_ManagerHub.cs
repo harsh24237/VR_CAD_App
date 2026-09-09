@@ -81,9 +81,9 @@ namespace VRCAD.Core
             {
                 // Spawn above the grid center with a slight random offset
                 Vector3 gridPos = env.GridCenter;
-                float spawnY = env.GridSurfaceY + 0.15f; // 15cm above grid
-                float rx = UnityEngine.Random.Range(-0.3f, 0.3f);
-                float rz = UnityEngine.Random.Range(-0.2f, 0.2f);
+                float spawnY = env.GridSurfaceY + 0.14f; // 14cm above grid
+                float rx = UnityEngine.Random.Range(-0.15f, 0.15f);
+                float rz = UnityEngine.Random.Range(-0.10f, 0.10f);
                 Vector3 spawnPos = new Vector3(gridPos.x + rx, spawnY, gridPos.z + rz);
                 return transformManager != null ? transformManager.ApplyPositionSnap(spawnPos) : spawnPos;
             }
@@ -151,7 +151,12 @@ namespace VRCAD.Core
             int faceTriIdx = selectionManager.SelectedFaceTriangleIndex;
             if (faceTriIdx < 0) faceTriIdx = 0; // Default to first face if in object mode
 
+            Mesh beforeMesh = (selected.MeshFilter.sharedMesh != null) ? UnityEngine.Object.Instantiate(selected.MeshFilter.sharedMesh) : null;
             bool success = extrusionManager.ExtrudeSelectedFace(selected, faceTriIdx, distance);
+            if (success && beforeMesh != null)
+            {
+                undoRedoManager?.RecordCommand(new MeshSnapshotCommand(selected, beforeMesh, selected.MeshFilter.sharedMesh, $"Extrude {selected.name}"));
+            }
             EmitStatus(success ? $"Extruded face by {distance * 1000:F0}mm" : "Extrusion failed");
             return success;
         }
@@ -414,6 +419,12 @@ namespace VRCAD.Core
         {
             currentColor = color;
             CADObject selected = selectionManager.SelectedObject;
+            if (selected == null && shapeManager.RegisteredObjects.Count > 0)
+            {
+                selected = shapeManager.RegisteredObjects[shapeManager.RegisteredObjects.Count - 1];
+                selectionManager.Select(selected, new RaycastHit());
+            }
+
             if (selected != null)
             {
                 selected.SetColor(color);
@@ -430,9 +441,16 @@ namespace VRCAD.Core
             currentRoughness = roughness;
             currentMetallic = metallic;
             CADObject selected = selectionManager.SelectedObject;
+            if (selected == null && shapeManager.RegisteredObjects.Count > 0)
+            {
+                selected = shapeManager.RegisteredObjects[shapeManager.RegisteredObjects.Count - 1];
+                selectionManager.Select(selected, new RaycastHit());
+            }
+
             if (selected != null)
             {
                 selected.SetMaterialProperties(roughness, metallic);
+                EmitStatus($"Roughness: {roughness:F2}, Metallic: {metallic:F2}");
             }
         }
 
@@ -440,6 +458,12 @@ namespace VRCAD.Core
         {
             currentOpacity = opacity;
             CADObject selected = selectionManager.SelectedObject;
+            if (selected == null && shapeManager.RegisteredObjects.Count > 0)
+            {
+                selected = shapeManager.RegisteredObjects[shapeManager.RegisteredObjects.Count - 1];
+                selectionManager.Select(selected, new RaycastHit());
+            }
+
             if (selected != null)
             {
                 selected.SetOpacity(opacity);
@@ -458,6 +482,12 @@ namespace VRCAD.Core
             currentColor = new Color(0.96f, 0.97f, 1.0f, 1.0f);
 
             CADObject selected = selectionManager.SelectedObject;
+            if (selected == null && shapeManager.RegisteredObjects.Count > 0)
+            {
+                selected = shapeManager.RegisteredObjects[shapeManager.RegisteredObjects.Count - 1];
+                selectionManager.Select(selected, new RaycastHit());
+            }
+
             if (selected != null)
             {
                 selected.ApplyChromePreset();

@@ -71,9 +71,17 @@ namespace VRCAD.UI
 
         private void Update()
         {
-            if (enableKeyboardControls)
+            // Skip keyboard panel movement when the PC flycam locomotion is active,
+            // so WASD/Q/E input goes to camera movement instead of panel movement.
+            if (enableKeyboardControls
+                && !(Core.PlayerLocomotionManager.Instance != null && Core.PlayerLocomotionManager.Instance.IsFlycamActive))
             {
                 HandleKeyboardMovement();
+            }
+
+            // Shortcuts (Ctrl+Z, Ctrl+Y) should always work regardless of flycam state.
+            if (enableKeyboardControls)
+            {
                 HandleKeyboardShortcuts();
             }
         }
