@@ -561,6 +561,153 @@ namespace VRCAD.Core
             selectedEdgeIndex = -1;
         }
 
+        #region Mesh Deformation
+
+        /// <summary>
+        /// Moves all vertices that share the same local position (to preserve hard normals/seams).
+        /// </summary>
+        private void MoveVerticesAtPosition(Vector3 originalPos, Vector3 localDelta, float tolerance = 0.001f)
+        {
+            Mesh m = MeshFilter.sharedMesh;
+            if (m == null) return;
+            Vector3[] verts = m.vertices;
+            bool changed = false;
+
+            for (int i = 0; i < verts.Length; i++)
+            {
+                if (Vector3.Distance(verts[i], originalPos) < tolerance)
+                {
+                    verts[i] += localDelta;
+                    changed = true;
+                }
+            }
+
+            if (changed)
+            {
+                m.vertices = verts;
+                m.RecalculateNormals();
+                m.RecalculateBounds();
+                MeshCollider.sharedMesh = m;
+                UpdateWireframeMesh();
+                if (isSelected) UpdateSelectionCageBounds();
+            }
+        }
+
+        public void ApplyVertexDeformation(int vertexIndex, Vector3 localDelta)
+        {
+            if (vertexIndex < 0 || MeshFilter.sharedMesh == null) return;
+            Vector3 originalPos = MeshFilter.sharedMesh.vertices[vertexIndex];
+            MoveVerticesAtPosition(originalPos, localDelta);
+        }
+
+        public void ApplyEdgeDeformation(int v1, int v2, Vector3 localDelta)
+        {
+            if (v1 < 0 || v2 < 0 || MeshFilter.sharedMesh == null) return;
+            Vector3 p1 = MeshFilter.sharedMesh.vertices[v1];
+            Vector3 p2 = MeshFilter.sharedMesh.vertices[v2];
+            
+            // Collect unique positions to move (p1 and p2)
+            MoveVerticesAtPosition(p1, localDelta);
+            MoveVerticesAtPosition(p2, localDelta);
+        }
+
+        public void ApplyFaceDeformation(int triangleIndex, Vector3 localDelta)
+        {
+            if (triangleIndex < 0 || MeshFilter.sharedMesh == null) return;
+            int[] tris = MeshFilter.sharedMesh.triangles;
+            if (triangleIndex * 3 + 2 >= tris.Length) return;
+
+            Vector3[] verts = MeshFilter.sharedMesh.vertices;
+            int i0 = tris[triangleIndex * 3 + 0];
+            int i1 = tris[triangleIndex * 3 + 1];
+            int i2 = tris[triangleIndex * 3 + 2];
+
+            Vector3 p0 = verts[i0];
+            Vector3 p1 = verts[i1];
+            Vector3 p2 = verts[i2];
+
+            // In flat-shaded Unity primitives (like Cube), a face typically consists of 4 vertices (2 triangles)
+            // sharing the same normal. We should move all vertices on that exact plane.
+            Vector3 normal = Vector3.Cross(p1 - p0, p2 - p0).normalized;
+            
+            MoveVerticesOnPlane(p0, normal, localDelta);
+        }
+
+        private void MoveVerticesOnPlane(Vector3 pointOnPlane, Vector3 normal, Vector3 localDelta, float tolerance = 0.005f)
+        {
+            Mesh m = MeshFilter.sharedMesh;
+            if (m == null) return;
+            Vector3[] verts = m.vertices;
+            bool changed = false;
+
+            for (int i = 0; i < verts.Length; i++)
+            {
+                // If the vertex is roughly on the plane
+                float distToPlane = Mathf.Abs(Vector3.Dot(normal, verts[i] - pointOnPlane));
+                if (distToPlane < tolerance)
+                {
+                    verts[i] += localDelta;
+                    changed = true;
+                }
+            }
+
+            if (changed)
+            {
+                m.vertices = verts;
+                m.RecalculateNormals();
+                m.RecalculateBounds();
+                MeshCollider.sharedMesh = m;
+                UpdateWireframeMesh();
+                if (isSelected) UpdateSelectionCageBounds();
+            }
+        }
+
+        public void ApplyBoundingBoxDeformation(Vector3 cornerDirection, Vector3 localDelta)
+        {
+            // cornerDirection is something like (1, 1, 1) or (-1, -1, 1) representing the 8 bounding box corners
+            // We stretch vertices that share the same sign direction from the center
+            Mesh m = MeshFilter.sharedMesh;
+            if (m == null) return;
+            Bounds b = m.bounds;
+            Vector3 center = b.center;
+            
+            Vector3[] verts = m.vertices;
+            bool changed = false;
+
+            for (int i = 0; i < verts.Length; i++)
+            {
+                Vector3 dirFromCenter = verts[i] - center;
+                // If this vertex is on the side of the corner being pulled
+                bool matchX = (cornerDirection.x > 0 && dirFromCenter.x > 0) || (cornerDirection.x < 0 && dirFromCenter.x < 0);
+                bool matchY = (cornerDirection.y > 0 && dirFromCenter.y > 0) || (cornerDirection.y < 0 && dirFromCenter.y < 0);
+                bool matchZ = (cornerDirection.z > 0 && dirFromCenter.z > 0) || (cornerDirection.z < 0 && dirFromCenter.z < 0);
+
+                // Apply partial delta based on how many axes match (corner stretches mostly that corner)
+                Vector3 vertDelta = Vector3.zero;
+                if (matchX) vertDelta.x = localDelta.x;
+                if (matchY) vertDelta.y = localDelta.y;
+                if (matchZ) vertDelta.z = localDelta.z;
+
+                if (vertDelta.sqrMagnitude > 0)
+                {
+                    verts[i] += vertDelta;
+                    changed = true;
+                }
+            }
+
+            if (changed)
+            {
+                m.vertices = verts;
+                m.RecalculateNormals();
+                m.RecalculateBounds();
+                MeshCollider.sharedMesh = m;
+                UpdateWireframeMesh();
+                if (isSelected) UpdateSelectionCageBounds();
+            }
+        }
+
+        #endregion
+
         private void OnSelectEntered(SelectEnterEventArgs args)
         {
             CADManagerHub.Instance?.OnObjectGrabbed(this, args);
@@ -578,6 +725,42 @@ namespace VRCAD.Core
                 grabInteractable.selectEntered.RemoveListener(OnSelectEntered);
                 grabInteractable.selectExited.RemoveListener(OnSelectExited);
             }
+        }
+
+        private float _mouseZCoord;
+        private Vector3 _mouseOffset;
+
+        private void OnMouseDown()
+        {
+            if (UnityEngine.EventSystems.EventSystem.current != null && UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject())
+                return; // Don't grab object if clicking UI
+
+            _mouseZCoord = Camera.main.WorldToScreenPoint(gameObject.transform.position).z;
+            _mouseOffset = gameObject.transform.position - GetMouseWorldPos();
+            CADManagerHub.Instance?.OnObjectGrabbed(this, null);
+        }
+
+        private void OnMouseUp()
+        {
+            CADManagerHub.Instance?.OnObjectReleased(this, null);
+        }
+
+        private void OnMouseDrag()
+        {
+            if (UnityEngine.EventSystems.EventSystem.current != null && UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject())
+                return;
+
+            if (Camera.main != null && CADManagerHub.Instance?.SelectionManager.ActiveMode == SelectionMode.Object)
+            {
+                transform.position = GetMouseWorldPos() + _mouseOffset;
+            }
+        }
+
+        private Vector3 GetMouseWorldPos()
+        {
+            Vector3 mousePoint = Input.mousePosition;
+            mousePoint.z = _mouseZCoord;
+            return Camera.main.ScreenToWorldPoint(mousePoint);
         }
     }
 }

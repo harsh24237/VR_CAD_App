@@ -5,6 +5,7 @@ using UnityEngine.InputSystem;
 using UnityEngine.UI;
 using UnityEngine.XR.Interaction.Toolkit;
 using UnityEngine.XR.Interaction.Toolkit.UI;
+using UnityEngine.XR.Management;
 
 namespace VRCAD.XR
 {
@@ -47,12 +48,14 @@ namespace VRCAD.XR
         private LineRenderer activeLineRenderer;
         private Transform activeControllerTransform;
         private bool isSimulatorActive = false;
+        private bool _hasDestroyedDeviceSimulator = false;
 
         private void Start()
         {
             mainCamera = Camera.main;
             ResolveReferences();
             CheckSimulatorMode();
+            TryDestroyXRDeviceSimulator();
         }
 
         private void Update()
@@ -64,6 +67,14 @@ namespace VRCAD.XR
             }
 
             CheckSimulatorMode();
+
+            // Keep trying to destroy XR Device Simulator for the first few frames
+            // (it can spawn after Start via XRDeviceSimulatorSettings auto-instantiation)
+            if (!_hasDestroyedDeviceSimulator)
+            {
+                TryDestroyXRDeviceSimulator();
+            }
+
             if (!isSimulatorActive)
             {
                 // In physical VR mode (Meta Quest 2), ensure both controllers are active
@@ -76,7 +87,6 @@ namespace VRCAD.XR
             EnsureControllerActive();
             UpdateControllerPosition();
             UpdateLaserAiming();
-            HandleMouseClickInteraction();
         }
 
         /// <summary>
@@ -111,6 +121,17 @@ namespace VRCAD.XR
             // If real VR is active (e.g. Meta Quest 2 via Quest Link / OpenXR), simulation MUST BE DISABLED
             // so left and right controllers track independently with 6DoF hardware input rather than mouse emulation.
             bool vrActive = VRCAD.Core.PlayerLocomotionManager.CheckIsVRPresent();
+
+            // Secondary check: if OpenXR loaded successfully, VR is definitely active
+            if (!vrActive)
+            {
+                var xrSettings = XRGeneralSettings.Instance;
+                if (xrSettings != null && xrSettings.Manager != null && xrSettings.Manager.activeLoader != null)
+                {
+                    vrActive = true;
+                }
+            }
+
             isSimulatorActive = !vrActive;
         }
 
@@ -215,19 +236,33 @@ namespace VRCAD.XR
             }
         }
 
+        private bool _wasClicking = false;
+
         private void HandleMouseClickInteraction()
         {
-            bool clickPressed = false;
+            bool isClicking = false;
             if (Mouse.current != null)
             {
-                clickPressed = Mouse.current.leftButton.wasPressedThisFrame;
+                isClicking = Mouse.current.leftButton.isPressed;
             }
             else
             {
-                clickPressed = Input.GetMouseButtonDown(0);
+                isClicking = Input.GetMouseButton(0);
             }
 
-            if (!clickPressed) return;
+            if (isClicking && !_wasClicking)
+            {
+                _wasClicking = true;
+            }
+            else if (!isClicking)
+            {
+                _wasClicking = false;
+                return;
+            }
+            else
+            {
+                return; // Was already clicking
+            }
 
             Vector2 mousePos = GetMousePosition();
             if (EventSystem.current == null) return;
@@ -250,8 +285,7 @@ namespace VRCAD.XR
                 Button btn = hitObj.GetComponentInParent<Button>();
                 if (btn != null && btn.interactable)
                 {
-                    btn.onClick.Invoke();
-                    ExecuteEvents.Execute(hitObj, ped, ExecuteEvents.pointerClickHandler);
+                    ExecuteEvents.Execute(btn.gameObject, ped, ExecuteEvents.pointerClickHandler);
                     return;
                 }
 
@@ -294,6 +328,42 @@ namespace VRCAD.XR
         {
             useRightHand = !useRightHand;
             ResolveReferences();
+        }
+
+        /// <summary>
+        /// Finds and destroys the auto-spawned XR Device Simulator at runtime.
+        /// The XRI Starter Assets include an XRDeviceSimulatorSettings that auto-spawns
+        /// a simulator prefab in Play Mode. This simulator overrides real Quest 2 hardware,
+        /// causing: (1) flat 2D rendering instead of stereoscopic VR, and
+        ///          (2) both controllers moving together instead of independently.
+        /// </summary>
+        private void TryDestroyXRDeviceSimulator()
+        {
+            // Search for any GameObject with "XR Device Simulator" in its name
+            // (the auto-spawned prefab is named "XR Device Simulator(Clone)")
+            var allObjects = FindObjectsOfType<MonoBehaviour>(true);
+            foreach (var mb in allObjects)
+            {
+                if (mb == null) continue;
+                string typeName = mb.GetType().Name;
+                if (typeName == "XRDeviceSimulator")
+                {
+                    Debug.Log($"[XRSimulatorLaserPointer] Found XR Device Simulator '{mb.gameObject.name}' — DESTROYING it to allow real Quest 2 hardware tracking.");
+                    Destroy(mb.gameObject);
+                    _hasDestroyedDeviceSimulator = true;
+                    return;
+                }
+            }
+
+            // Also check by name pattern
+            var simObj = GameObject.Find("XR Device Simulator(Clone)");
+            if (simObj == null) simObj = GameObject.Find("XR Device Simulator");
+            if (simObj != null)
+            {
+                Debug.Log($"[XRSimulatorLaserPointer] Found XR Device Simulator by name '{simObj.name}' — DESTROYING.");
+                Destroy(simObj);
+                _hasDestroyedDeviceSimulator = true;
+            }
         }
     }
 }

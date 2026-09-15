@@ -66,6 +66,12 @@ namespace VRCAD.Core
             constraintManager ??= GetComponentInChildren<CAD_ConstraintManager>() ?? gameObject.AddComponent<CAD_ConstraintManager>();
             exportManager ??= GetComponentInChildren<CAD_ExportManager>() ?? gameObject.AddComponent<CAD_ExportManager>();
             undoRedoManager ??= GetComponentInChildren<CAD_UndoRedoManager>() ?? gameObject.AddComponent<CAD_UndoRedoManager>();
+            
+            // Add interaction handle manager for dynamic VR grabbing
+            if (GetComponentInChildren<CAD_InteractionHandleManager>() == null)
+            {
+                gameObject.AddComponent<CAD_InteractionHandleManager>();
+            }
         }
 
         public Vector3 GetSpawnPosition()

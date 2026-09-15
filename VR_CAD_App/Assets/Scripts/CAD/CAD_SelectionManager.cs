@@ -50,6 +50,30 @@ namespace VRCAD.Core
             CreateVisualHelpers();
         }
 
+        private void Start()
+        {
+            if (CADManagerHub.Instance != null)
+            {
+                CADManagerHub.Instance.ShapeDeleted += OnShapeDeleted;
+            }
+        }
+
+        private void OnDestroy()
+        {
+            if (CADManagerHub.Instance != null)
+            {
+                CADManagerHub.Instance.ShapeDeleted -= OnShapeDeleted;
+            }
+        }
+
+        private void OnShapeDeleted(CADObject obj)
+        {
+            if (selectedObject != null && selectedObject == obj)
+            {
+                ClearSelection();
+            }
+        }
+
         private void CreateVisualHelpers()
         {
             selectionVisualizer = new GameObject("CAD_SelectionVisualizer");
@@ -261,6 +285,7 @@ namespace VRCAD.Core
             selectedVertexIndex = -1;
             selectedEdge = (-1, -1);
             HideVisualHelpers();
+            CADManagerHub.Instance?.OnSelectionUpdated(null);
         }
 
         private float DistancePointToSegment(Vector3 p, Vector3 a, Vector3 b)

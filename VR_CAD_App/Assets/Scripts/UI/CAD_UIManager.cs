@@ -191,6 +191,12 @@ namespace VRCAD.UI
             GameObject existingCanvas = GameObject.Find("CAD_VR_Canvas");
             if (existingCanvas != null)
             {
+                var raycaster = existingCanvas.GetComponent<UnityEngine.XR.Interaction.Toolkit.UI.TrackedDeviceGraphicRaycaster>();
+                if (raycaster != null) 
+                { 
+                    raycaster.enabled = false; 
+                    DestroyImmediate(raycaster); 
+                }
                 DestroyImmediate(existingCanvas);
             }
 
@@ -225,9 +231,9 @@ namespace VRCAD.UI
 
             Canvas canvas = canvasObj.AddComponent<Canvas>();
             canvas.renderMode = RenderMode.WorldSpace;
-            if (canvas.worldCamera == null && Camera.main != null)
+            if (canvas.worldCamera == null)
             {
-                canvas.worldCamera = Camera.main;
+                canvas.worldCamera = Camera.main != null ? Camera.main : FindObjectOfType<Camera>();
             }
 
             CanvasScaler scaler = canvasObj.AddComponent<CanvasScaler>();
@@ -237,9 +243,6 @@ namespace VRCAD.UI
             // Non-blocking raycasters: ensure 3D physics colliders never occlude UI graphic raycasts
             GraphicRaycaster gr = canvasObj.AddComponent<GraphicRaycaster>();
             gr.blockingObjects = GraphicRaycaster.BlockingObjects.None;
-
-            TrackedDeviceGraphicRaycaster trackedRaycaster = canvasObj.AddComponent<TrackedDeviceGraphicRaycaster>();
-            trackedRaycaster.blockingMask = 0; // LayerMask 0 = Nothing blocks raycasts
 
             RectTransform canvasRect = canvasObj.GetComponent<RectTransform>();
             canvasRect.sizeDelta = new Vector2(TOP_BAR_W + 40, 560);
@@ -269,7 +272,7 @@ namespace VRCAD.UI
             // Deferred by one frame so XRI's internal Awake() registration completes first,
             // preventing KeyNotFoundException on the interactable's transformer dictionary.
             CAD_UIPanelManipulator zoomManipulator = canvasObj.AddComponent<CAD_UIPanelManipulator>();
-            StartCoroutine(DeferredAddGrabTransformer(grab, zoomManipulator));
+            StartCoroutine(DeferredAddGrabTransformer(grab, zoomManipulator, canvas));
 
             BuildTopBar(canvasObj.transform);
             BuildPanelsRow(canvasObj.transform);
@@ -279,12 +282,12 @@ namespace VRCAD.UI
 
         /// <summary>
         /// Waits until the XRGrabInteractable has been picked up by the
-        /// XRInteractionManager before adding the grab transformer.
+        /// XRInteractionManager before adding the grab transformer and tracked raycaster.
         /// In XRI 2.6.x, the interactionManager property is assigned once
         /// registration completes — we poll for that instead of isRegistered
         /// (which doesn't exist in this version).
         /// </summary>
-        private IEnumerator DeferredAddGrabTransformer(XRGrabInteractable grab, CAD_UIPanelManipulator transformer)
+        private IEnumerator DeferredAddGrabTransformer(XRGrabInteractable grab, CAD_UIPanelManipulator transformer, Canvas canvas)
         {
             // Wait until XRI assigns the interaction manager (up to ~60 frames / 1 second).
             int maxWaitFrames = 60;
@@ -315,6 +318,14 @@ namespace VRCAD.UI
             catch (System.Exception e)
             {
                 Debug.LogWarning($"[CAD_UIManager] Could not add grab transformer: {e.Message}");
+            }
+
+            // Defer attaching TrackedDeviceGraphicRaycaster until Canvas has finalized its layout & camera to prevent XR toolkit KeyNotFoundException
+            if (canvas != null && canvas.gameObject.GetComponent<TrackedDeviceGraphicRaycaster>() == null)
+            {
+                TrackedDeviceGraphicRaycaster trackedRaycaster = canvas.gameObject.AddComponent<TrackedDeviceGraphicRaycaster>();
+                trackedRaycaster.blockingMask = 0; // LayerMask 0 = Nothing blocks raycasts
+                canvas.gameObject.AddComponent<CAD_RaycasterCleanup>();
             }
         }
 
@@ -1768,5 +1779,29 @@ namespace VRCAD.UI
         }
 
         #endregion
+    }
+
+    /// <summary>
+    /// Utility component to prevent a common XR Interaction Toolkit bug.
+    /// TrackedDeviceGraphicRaycaster throws a KeyNotFoundException during OnDisable
+    /// if the Canvas is disabled/destroyed before it. This script ensures the raycaster
+    /// is always disabled safely first.
+    /// </summary>
+    public class CAD_RaycasterCleanup : MonoBehaviour
+    {
+        private UnityEngine.XR.Interaction.Toolkit.UI.TrackedDeviceGraphicRaycaster raycaster;
+
+        private void Awake()
+        {
+            raycaster = GetComponent<UnityEngine.XR.Interaction.Toolkit.UI.TrackedDeviceGraphicRaycaster>();
+        }
+
+        private void OnDisable()
+        {
+            if (raycaster != null)
+            {
+                raycaster.enabled = false;
+            }
+        }
     }
 }
