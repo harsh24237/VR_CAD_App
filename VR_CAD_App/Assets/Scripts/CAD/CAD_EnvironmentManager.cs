@@ -65,8 +65,24 @@ namespace VRCAD.Core
             ApplySpaceCameraSettings();
         }
 
+        private bool isPassthroughActive = false;
+
+        public void SetPassthroughActive(bool active)
+        {
+            isPassthroughActive = active;
+            
+            // Toggle starry skybox visuals
+            Transform stars = environmentRoot.transform.Find("StarsRoot");
+            if (stars != null) stars.gameObject.SetActive(!active);
+
+            Transform nebulae = environmentRoot.transform.Find("NebulaeRoot");
+            if (nebulae != null) nebulae.gameObject.SetActive(!active);
+        }
+
         private void LateUpdate()
         {
+            if (isPassthroughActive) return;
+
             // Ensure camera background remains deep space black even if XR runtime resets it
             if (Camera.main != null && Camera.main.backgroundColor != spaceBackgroundColor)
             {

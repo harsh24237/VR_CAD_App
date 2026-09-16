@@ -78,6 +78,33 @@ namespace VRCAD.Core
             // Hover Events
             grabInteractable.hoverEntered.AddListener(OnHoverEntered);
             grabInteractable.hoverExited.AddListener(OnHoverExited);
+
+            // Grab Events for Interpolation sync
+            grabInteractable.selectEntered.AddListener(OnHandGrabbed);
+            grabInteractable.selectExited.AddListener(OnHandReleased);
+        }
+
+        private void OnHandGrabbed(SelectEnterEventArgs args)
+        {
+            SetGrabState(true);
+            HapticFeedbackManager.Instance?.TriggerHaptic(args, 0.6f, 0.1f);
+        }
+
+        private void OnHandReleased(SelectExitEventArgs args)
+        {
+            SetGrabState(false);
+        }
+
+        public void SetGrabState(bool isGrabbed)
+        {
+            if (shapesRootTransform != null)
+            {
+                Rigidbody[] rbs = shapesRootTransform.GetComponentsInChildren<Rigidbody>();
+                foreach (var r in rbs)
+                {
+                    r.interpolation = isGrabbed ? RigidbodyInterpolation.None : RigidbodyInterpolation.Interpolate;
+                }
+            }
         }
 
         private void OnHoverEntered(HoverEnterEventArgs args)
@@ -181,6 +208,7 @@ namespace VRCAD.Core
             isGrabbed = true;
             // Fake hover for testing
             handle.SetHoverState(true);
+            handle.SetGrabState(true);
         }
 
         private void OnMouseDrag()
@@ -197,6 +225,7 @@ namespace VRCAD.Core
         {
             isGrabbed = false;
             handle.SetHoverState(false);
+            handle.SetGrabState(false);
         }
     }
 }

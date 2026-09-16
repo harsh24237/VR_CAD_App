@@ -81,19 +81,14 @@ namespace VRCAD.Core
 
         private CAD_InteractionHandle CreateHandle(Vector3 worldPos, string nameSuffix)
         {
-            GameObject handleObj = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            GameObject handleObj = GameObject.CreatePrimitive(PrimitiveType.Sphere);
             handleObj.name = $"InteractionHandle_{nameSuffix}";
             handleObj.transform.position = worldPos;
-            handleObj.transform.localScale = Vector3.one * 0.02f; // 2cm handle
+            handleObj.transform.localScale = Vector3.one * 0.015f; 
             
-            // Remove regular collider, add trigger for grab
             Destroy(handleObj.GetComponent<Collider>());
-            BoxCollider col = handleObj.AddComponent<BoxCollider>();
+            SphereCollider col = handleObj.AddComponent<SphereCollider>();
             col.isTrigger = false; 
-            // Note: XR Grab Interactable needs a collider to be grabbed.
-            
-            // Put it on a UI/Ignore Raycast layer so it doesn't block mesh clicking if needed?
-            // Actually, we want the ray interactor to hit it. Default layer is fine.
 
             CAD_InteractionHandle handle = handleObj.AddComponent<CAD_InteractionHandle>();
             handle.OnHandleDragged += OnHandleDragged;
@@ -182,7 +177,7 @@ namespace VRCAD.Core
 
         private void SpawnVertexHandles(CADObject target, Mesh mesh)
         {
-            float tolerance = 0.001f;
+            float tolerance = 0.005f;
             List<Vector3> uniqueVerts = new List<Vector3>();
 
             for (int i = 0; i < mesh.vertices.Length; i++)
@@ -210,7 +205,7 @@ namespace VRCAD.Core
 
         private void SpawnEdgeHandles(CADObject target, Mesh mesh)
         {
-            float tolerance = 0.001f;
+            float tolerance = 0.005f;
             int[] tris = mesh.triangles;
             Vector3[] verts = mesh.vertices;
             
@@ -255,7 +250,7 @@ namespace VRCAD.Core
 
         private void SpawnFaceHandles(CADObject target, Mesh mesh)
         {
-            float tolerance = 0.001f;
+            float tolerance = 0.005f;
             int[] tris = mesh.triangles;
             Vector3[] verts = mesh.vertices;
             

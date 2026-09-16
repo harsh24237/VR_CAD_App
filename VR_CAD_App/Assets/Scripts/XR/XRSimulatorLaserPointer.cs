@@ -339,6 +339,12 @@ namespace VRCAD.XR
         /// </summary>
         private void TryDestroyXRDeviceSimulator()
         {
+            if (!UnityEngine.XR.XRSettings.isDeviceActive)
+            {
+                _hasDestroyedDeviceSimulator = true;
+                return;
+            }
+
             // Search for any GameObject with "XR Device Simulator" in its name
             // (the auto-spawned prefab is named "XR Device Simulator(Clone)")
             var allObjects = FindObjectsOfType<MonoBehaviour>(true);

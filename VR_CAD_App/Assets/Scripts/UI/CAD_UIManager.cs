@@ -129,6 +129,15 @@ namespace VRCAD.UI
             SetupEnvironment();
             BuildCompleteUI();
             SubscribeToEvents();
+
+            // Auto-rig all buttons with universal haptic feedback
+            foreach (var btn in GetComponentsInChildren<Button>(true))
+            {
+                if (btn.GetComponent<UIHapticTrigger>() == null)
+                {
+                    btn.gameObject.AddComponent<UIHapticTrigger>();
+                }
+            }
         }
 
         private void SpawnInitialDemoShape()
@@ -1115,13 +1124,13 @@ namespace VRCAD.UI
         {
             GameObject card = CreateCardPanel("Card_Operations", parent, pos, size, "OPERATIONS", true);
 
-            string[] names = { "Extrude", "Bevel", "Chamfer", "Hole Cut", "Union", "Subtract" };
+            string[] names = { "Extrude", "Bevel", "Chamfer", "Intrusion", "Union", "Subtract" };
             string[] icons = { "EXT", "BEV", "CHM", "CUT", "UNI", "SUB" };
             Action[] actions = {
                 () => CADManagerHub.Instance?.ExtrudeSelection(0.05f),
                 () => CADManagerHub.Instance?.ApplyBevelToSelection(0.03f),
                 () => CADManagerHub.Instance?.ApplyChamferToSelection(0.03f),
-                () => CADManagerHub.Instance?.CutHoleInSelection(0.03f, 0.25f),
+                () => CADManagerHub.Instance?.ToggleIntrusionTool(),
                 () => CADManagerHub.Instance?.PerformUnion(),
                 () => CADManagerHub.Instance?.PerformCombine(),
             };
@@ -1183,13 +1192,16 @@ namespace VRCAD.UI
             float btnH = 50f;
             float gap = 5f;
 
-            string[] names = { "Constraints", "Measure", "Align", "Reset View" };
-            string[] icons = { "CNST", "MEAS", "ALGN", "RST" };
+            string[] names = { "Constraints", "Measure", "Align", "Passthrough" };
+            string[] icons = { "CNST", "MEAS", "ALGN", "PT" };
             Action[] actions = {
                 () => CADManagerHub.Instance?.EmitStatus("Constraints: None active"),
                 () => CADManagerHub.Instance?.EmitStatus("Measure Tool Ready"),
                 () => CADManagerHub.Instance?.EmitStatus("Align Object to Grid"),
-                () => CADManagerHub.Instance?.EmitStatus("Workspace View Reset")
+                () => {
+                    PassthroughManager.Instance?.TogglePassthrough();
+                    CADManagerHub.Instance?.EmitStatus("Toggled Passthrough");
+                }
             };
 
             for (int i = 0; i < names.Length; i++)

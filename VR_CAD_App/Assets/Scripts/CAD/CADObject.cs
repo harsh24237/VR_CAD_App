@@ -710,6 +710,7 @@ namespace VRCAD.Core
 
         private void OnSelectEntered(SelectEnterEventArgs args)
         {
+            _hasGrabInit = false;
             CADManagerHub.Instance?.OnObjectGrabbed(this, args);
         }
 
@@ -724,6 +725,35 @@ namespace VRCAD.Core
             {
                 grabInteractable.selectEntered.RemoveListener(OnSelectEntered);
                 grabInteractable.selectExited.RemoveListener(OnSelectExited);
+            }
+        }
+
+        private Vector3 _lastSnappedPos;
+        private bool _hasGrabInit = false;
+
+        private void Update()
+        {
+            if (grabInteractable != null && grabInteractable.isSelected)
+            {
+                var tm = CADManagerHub.Instance?.TransformManager;
+                if (tm != null && tm.SnapEnabled)
+                {
+                    Vector3 currentSnap = tm.ApplyPositionSnap(transform.position);
+                    if (!_hasGrabInit)
+                    {
+                        _lastSnappedPos = currentSnap;
+                        _hasGrabInit = true;
+                    }
+
+                    if (Vector3.Distance(currentSnap, _lastSnappedPos) > 0.0001f)
+                    {
+                        _lastSnappedPos = currentSnap;
+                        if (grabInteractable.interactorsSelecting.Count > 0)
+                        {
+                            HapticFeedbackManager.Instance?.TriggerHaptic(grabInteractable.interactorsSelecting[0], 0.8f, 0.02f);
+                        }
+                    }
+                }
             }
         }
 

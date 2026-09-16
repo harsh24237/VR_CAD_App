@@ -41,6 +41,8 @@ namespace VRCAD.Core
             grabInteractable.movementType = XRBaseInteractable.MovementType.Instantaneous;
             grabInteractable.selectEntered.AddListener(OnGrabbed);
             grabInteractable.selectExited.AddListener(OnReleased);
+            grabInteractable.hoverEntered.AddListener(OnHoverEntered);
+            grabInteractable.hoverExited.AddListener(OnHoverExited);
         }
 
         public void InitializeForVertex(CADObject target, int vIdx)
@@ -76,41 +78,104 @@ namespace VRCAD.Core
             SetVisualColor(new Color(0.2f, 0.6f, 0.9f, 0.8f));
         }
 
+        private Material dimMat;
+        private Material hoverMat;
+        private MeshRenderer rend;
+
         private void SetVisualColor(Color col)
         {
-            var mr = GetComponent<MeshRenderer>();
-            if (mr != null)
+            rend = GetComponent<MeshRenderer>();
+            if (rend != null)
             {
-                Material mat = new Material(Shader.Find("Unlit/Color") ?? Shader.Find("Standard"));
-                mat.color = col;
-                mr.material = mat;
+                Shader std = Shader.Find("Standard");
+                
+                // Dim Transparent Material
+                dimMat = new Material(std);
+                dimMat.color = new Color(col.r, col.g, col.b, 0.35f);
+                dimMat.SetFloat("_Mode", 3); // Transparent
+                dimMat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.One);
+                dimMat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+                dimMat.SetInt("_ZWrite", 0);
+                dimMat.DisableKeyword("_ALPHATEST_ON");
+                dimMat.DisableKeyword("_ALPHABLEND_ON");
+                dimMat.EnableKeyword("_ALPHAPREMULTIPLY_ON");
+                dimMat.renderQueue = 3000;
+
+                // Bright Opaque Hover Material
+                hoverMat = new Material(std);
+                hoverMat.color = new Color(0.2f, 1.0f, 0.2f, 1.0f); // Bright opaque green
+
+                rend.material = dimMat;
             }
         }
 
-        private void OnGrabbed(SelectEnterEventArgs arg0)
+        private void OnHoverEntered(HoverEnterEventArgs args)
+        {
+            if (rend != null && hoverMat != null)
+                rend.material = hoverMat;
+        }
+
+        private void OnHoverExited(HoverExitEventArgs args)
+        {
+            if (rend != null && dimMat != null)
+                rend.material = dimMat;
+        }
+
+        private void OnGrabbed(SelectEnterEventArgs args)
         {
             isGrabbed = true;
             lastWorldPosition = transform.position;
+            _hasGrabInit = false;
+            HapticFeedbackManager.Instance?.TriggerHaptic(args, 0.6f, 0.1f);
             OnHandleGrabbed?.Invoke(this);
         }
 
-        private void OnReleased(SelectExitEventArgs arg0)
+        private void OnReleased(SelectExitEventArgs args)
         {
             isGrabbed = false;
             OnHandleReleased?.Invoke(this);
         }
+
+        private Vector3 _lastSnappedPosition;
+        private bool _hasGrabInit = false;
 
         private void Update()
         {
             if (isGrabbed && TargetObject != null)
             {
                 Vector3 currentPos = transform.position;
-                Vector3 delta = currentPos - lastWorldPosition;
+                var tm = CADManagerHub.Instance?.TransformManager;
                 
-                if (delta.sqrMagnitude > 0.000001f)
+                if (tm != null && tm.SnapEnabled)
                 {
-                    OnHandleDragged?.Invoke(this, delta);
-                    lastWorldPosition = currentPos;
+                    Vector3 snappedPos = tm.ApplyPositionSnap(currentPos);
+                    
+                    if (!_hasGrabInit)
+                    {
+                        _lastSnappedPosition = snappedPos;
+                        _hasGrabInit = true;
+                    }
+
+                    Vector3 delta = snappedPos - _lastSnappedPosition;
+                    if (delta.sqrMagnitude > 0.000001f)
+                    {
+                        OnHandleDragged?.Invoke(this, delta);
+                        _lastSnappedPosition = snappedPos;
+                        
+                        if (grabInteractable != null && grabInteractable.interactorsSelecting.Count > 0)
+                        {
+                            HapticFeedbackManager.Instance?.TriggerHaptic(grabInteractable.interactorsSelecting[0], 0.8f, 0.02f);
+                        }
+                    }
+                }
+                else
+                {
+                    Vector3 delta = currentPos - lastWorldPosition;
+                    if (delta.sqrMagnitude > 0.000001f)
+                    {
+                        OnHandleDragged?.Invoke(this, delta);
+                        lastWorldPosition = currentPos;
+                    }
                 }
             }
         }
