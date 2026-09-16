@@ -43,6 +43,21 @@ namespace VRCAD.Core
         public bool Undo() => undoRedoManager != null && undoRedoManager.Undo();
         public bool Redo() => undoRedoManager != null && undoRedoManager.Redo();
 
+        public void UndoShapeCreation(CADObject obj)
+        {
+            if (obj != null) Destroy(obj.gameObject);
+        }
+
+        public void ToggleIntrusionTool()
+        {
+            var tool = GetComponentInChildren<VRCAD.Tools.IntrusionTool>();
+            if (tool != null)
+            {
+                tool.IsActive = !tool.IsActive;
+                EmitStatus(tool.IsActive ? "Intrusion Tool Active: Point & Pull Trigger to Push Face" : "Intrusion Tool Deactivated");
+            }
+        }
+
         private void Awake()
         {
             if (Instance != null && Instance != this)
@@ -66,6 +81,28 @@ namespace VRCAD.Core
             constraintManager ??= GetComponentInChildren<CAD_ConstraintManager>() ?? gameObject.AddComponent<CAD_ConstraintManager>();
             exportManager ??= GetComponentInChildren<CAD_ExportManager>() ?? gameObject.AddComponent<CAD_ExportManager>();
             undoRedoManager ??= GetComponentInChildren<CAD_UndoRedoManager>() ?? gameObject.AddComponent<CAD_UndoRedoManager>();
+            
+            // Add interaction handle manager for dynamic VR grabbing
+            if (GetComponentInChildren<CAD_InteractionHandleManager>() == null)
+            {
+                gameObject.AddComponent<CAD_InteractionHandleManager>();
+            }
+
+            if (GetComponentInChildren<VRCAD.Tools.MeshSlicerTool>() == null)
+            {
+                gameObject.AddComponent<VRCAD.Tools.MeshSlicerTool>();
+            }
+
+            if (GetComponentInChildren<VRCAD.Tools.IntrusionTool>() == null)
+            {
+                gameObject.AddComponent<VRCAD.Tools.IntrusionTool>();
+            }
+
+            if (FindObjectOfType<VRCAD.UI.WristUIManager>() == null)
+            {
+                GameObject uiManagerObj = new GameObject("WristUIManager");
+                uiManagerObj.AddComponent<VRCAD.UI.WristUIManager>();
+            }
         }
 
         public Vector3 GetSpawnPosition()

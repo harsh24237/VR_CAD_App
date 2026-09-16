@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;
@@ -122,6 +123,14 @@ namespace VRCAD.Core
         {
             // Re-evaluate on Start as OpenXR subsystems often finish initializing after Awake
             EvaluateVRState(forceReconfigure: true);
+
+            // If OpenXR didn't auto-initialize (e.g. m_AutomaticLoading was off), try manual init
+            var xrSettings = XRGeneralSettings.Instance;
+            if (xrSettings != null && xrSettings.Manager != null && xrSettings.Manager.activeLoader == null)
+            {
+                Debug.Log("[PlayerLocomotionManager] OpenXR loader not active — attempting manual initialization...");
+                StartCoroutine(TryInitializeXR());
+            }
         }
 
         private void OnDestroy()
@@ -250,10 +259,8 @@ namespace VRCAD.Core
             var xrSettings = XRGeneralSettings.Instance;
             if (xrSettings != null && xrSettings.Manager != null && xrSettings.Manager.activeLoader != null)
             {
-                if (displaySubsystems.Count > 0)
-                {
-                    return true;
-                }
+                // Active loader present — OpenXR is running, VR is available
+                return true;
             }
 
             // 4. Legacy fallback
@@ -267,6 +274,47 @@ namespace VRCAD.Core
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// Coroutine fallback: manually initializes the XR subsystem if auto-loading was disabled.
+        /// This ensures VR works even if someone forgot to enable "Initialize XR on Startup".
+        /// </summary>
+        private IEnumerator TryInitializeXR()
+        {
+            var xrManager = XRGeneralSettings.Instance?.Manager;
+            if (xrManager == null)
+            {
+                Debug.LogWarning("[PlayerLocomotionManager] XRManagerSettings is null — cannot initialize XR.");
+                yield break;
+            }
+
+            if (xrManager.activeLoader != null)
+            {
+                // Already loaded, just re-evaluate state
+                EvaluateVRState(forceReconfigure: true);
+                yield break;
+            }
+
+            Debug.Log("[PlayerLocomotionManager] Manually initializing XR loader...");
+            yield return xrManager.InitializeLoader();
+
+            if (xrManager.activeLoader != null)
+            {
+                Debug.Log($"[PlayerLocomotionManager] XR loader initialized: {xrManager.activeLoader.GetType().Name}. Starting subsystems...");
+                xrManager.StartSubsystems();
+
+                // Give subsystems a frame to fully start
+                yield return null;
+                yield return null;
+
+                EvaluateVRState(forceReconfigure: true);
+                Debug.Log("[PlayerLocomotionManager] Manual XR initialization complete. VR should now be in 3D stereoscopic mode.");
+            }
+            else
+            {
+                Debug.LogWarning("[PlayerLocomotionManager] Failed to initialize XR loader. Check Project Settings → XR Plug-in Management.");
+            }
         }
 
         /// <summary>

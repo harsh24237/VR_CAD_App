@@ -65,8 +65,24 @@ namespace VRCAD.Core
             ApplySpaceCameraSettings();
         }
 
+        private bool isPassthroughActive = false;
+
+        public void SetPassthroughActive(bool active)
+        {
+            isPassthroughActive = active;
+            
+            // Toggle starry skybox visuals
+            Transform stars = environmentRoot.transform.Find("StarsRoot");
+            if (stars != null) stars.gameObject.SetActive(!active);
+
+            Transform nebulae = environmentRoot.transform.Find("NebulaeRoot");
+            if (nebulae != null) nebulae.gameObject.SetActive(!active);
+        }
+
         private void LateUpdate()
         {
+            if (isPassthroughActive) return;
+
             // Ensure camera background remains deep space black even if XR runtime resets it
             if (Camera.main != null && Camera.main.backgroundColor != spaceBackgroundColor)
             {
@@ -300,43 +316,36 @@ namespace VRCAD.Core
         }
 
         /// <summary>
-        /// Attaches physics, XR interaction, and two-handed grab support to the grid
-        /// so users can freely reposition and rotate it in VR.
+        /// Creates a dedicated handle below the front edge of the grid to move and rotate 
+        /// the entire workspace without overlapping colliders with CAD objects.
         /// </summary>
         private void MakeGridInteractable(GameObject gridRoot, float halfW, float halfD)
         {
             gridRootObj = gridRoot;
 
-            // ── BoxCollider spanning the grid's surface ──
-            BoxCollider col = gridRoot.AddComponent<BoxCollider>();
-            col.size = new Vector3(gridWidth, 0.02f, gridDepth);
-            col.center = Vector3.zero;
+            // Create an empty GameObject for the handle, positioned just below the front edge
+            GameObject handleObj = new GameObject("GridTransformHandle");
+            handleObj.transform.SetParent(environmentRoot.transform);
+            
+            // Position it at the front edge (negative Z) and slightly down (negative Y)
+            Vector3 handlePos = gridRoot.transform.position + new Vector3(0, -0.05f, -halfD);
+            handleObj.transform.position = handlePos;
 
-            // ── Kinematic Rigidbody (floating, no gravity) ──
-            Rigidbody rb = gridRoot.AddComponent<Rigidbody>();
-            rb.useGravity = false;
-            rb.isKinematic = true;
-            rb.collisionDetectionMode = CollisionDetectionMode.ContinuousSpeculative;
+            // Attach the GridTransformHandle component
+            GridTransformHandle handle = handleObj.AddComponent<GridTransformHandle>();
+            handle.gridFloorTransform = gridRoot.transform;
 
-            // ── XRGrabInteractable ──
-            XRGrabInteractable grab = gridRoot.AddComponent<XRGrabInteractable>();
-            grab.movementType = XRBaseInteractable.MovementType.VelocityTracking;
-            grab.throwOnDetach = false;
-            grab.retainTransformParent = true;
-            grab.useDynamicAttach = true;
-
-            // Allow two-handed interaction: select mode = Multiple so both
-            // controllers can grab simultaneously for repositioning + Y-axis rotation.
-            grab.selectMode = InteractableSelectMode.Multiple;
-
-            // Ensure the grid stays floating after release.
-            grab.selectExited.AddListener((args) =>
+            // The shapes root might not be initialized yet, so we can find it or let it be linked later
+            GameObject shapesRootObj = GameObject.Find("CAD_Geometry_Root");
+            if (shapesRootObj != null)
             {
-                rb.useGravity = false;
-                rb.isKinematic = true;
-                rb.velocity = Vector3.zero;
-                rb.angularVelocity = Vector3.zero;
-            });
+                handle.shapesRootTransform = shapesRootObj.transform;
+            }
+            else
+            {
+                // We'll rely on CAD_ShapeManager to link itself when it awakens, 
+                // but since EnvironmentManager is typically first, we might just look for it or wait.
+            }
         }
 
         /// <summary>

@@ -148,6 +148,97 @@ namespace VRCAD.Core
             return true;
         }
 
+        public bool PrepareFaceForInteractiveExtrusion(CADObject cadObject, int triangleIndex, out List<int> manipulableVertexIndices)
+        {
+            manipulableVertexIndices = new List<int>();
+            if (cadObject == null || cadObject.MeshFilter.sharedMesh == null || triangleIndex < 0) return false;
+
+            Mesh originalMesh = cadObject.MeshFilter.sharedMesh;
+            Vector3[] verts = originalMesh.vertices;
+            int[] tris = originalMesh.triangles;
+            Vector3[] normals = originalMesh.normals;
+            Vector2[] uvs = originalMesh.uv;
+
+            if (triangleIndex * 3 + 2 >= tris.Length) return false;
+
+            int i0 = tris[triangleIndex * 3 + 0];
+            int i1 = tris[triangleIndex * 3 + 1];
+            int i2 = tris[triangleIndex * 3 + 2];
+
+            Vector3 faceNormal = Vector3.Cross(verts[i1] - verts[i0], verts[i2] - verts[i0]).normalized;
+            if (faceNormal.sqrMagnitude < 0.001f) faceNormal = normals[i0];
+
+            List<int> faceTriangles = FindCoplanarFaceTriangles(verts, tris, triangleIndex, faceNormal);
+
+            HashSet<int> faceVertIndices = new HashSet<int>();
+            foreach (int triIdx in faceTriangles)
+            {
+                faceVertIndices.Add(tris[triIdx * 3 + 0]);
+                faceVertIndices.Add(tris[triIdx * 3 + 1]);
+                faceVertIndices.Add(tris[triIdx * 3 + 2]);
+            }
+
+            List<(int a, int b)> boundaryEdges = FindBoundaryEdges(tris, faceTriangles);
+
+            List<Vector3> newVerts = new List<Vector3>(verts);
+            List<Vector3> newNorms = (normals != null && normals.Length == verts.Length) ? new List<Vector3>(normals) : new List<Vector3>(new Vector3[verts.Length]);
+            List<int> newTris = new List<int>(tris);
+            List<Vector2> newUvs = new List<Vector2>(verts.Length);
+
+            if (uvs != null && uvs.Length == verts.Length) newUvs.AddRange(uvs);
+            else for (int i = 0; i < verts.Length; i++) newUvs.Add(new Vector2(verts[i].x, verts[i].z));
+
+            Dictionary<int, int> oldToExtrudedMap = new Dictionary<int, int>();
+            foreach (int vIdx in faceVertIndices)
+            {
+                int newIdx = newVerts.Count;
+                newVerts.Add(verts[vIdx]); // 0 offset
+                newNorms.Add(faceNormal);
+                newUvs.Add(newUvs.Count > vIdx ? newUvs[vIdx] : new Vector2(verts[vIdx].x, verts[vIdx].z));
+                oldToExtrudedMap[vIdx] = newIdx;
+                manipulableVertexIndices.Add(newIdx); // Track the indices of the extruded cap vertices
+            }
+
+            foreach (int triIdx in faceTriangles)
+            {
+                newTris[triIdx * 3 + 0] = oldToExtrudedMap[tris[triIdx * 3 + 0]];
+                newTris[triIdx * 3 + 1] = oldToExtrudedMap[tris[triIdx * 3 + 1]];
+                newTris[triIdx * 3 + 2] = oldToExtrudedMap[tris[triIdx * 3 + 2]];
+            }
+
+            foreach (var edge in boundaryEdges)
+            {
+                int botA = edge.a;
+                int botB = edge.b;
+                int topA = oldToExtrudedMap[edge.a];
+                int topB = oldToExtrudedMap[edge.b];
+
+                newTris.Add(botA); newTris.Add(topA); newTris.Add(topB);
+                newTris.Add(botA); newTris.Add(topB); newTris.Add(botB);
+            }
+
+            Mesh extrudedMesh = new Mesh { name = originalMesh.name + "_Interactive" };
+            if (newVerts.Count > 65535) extrudedMesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
+
+            extrudedMesh.SetVertices(newVerts);
+            extrudedMesh.SetTriangles(newTris, 0);
+
+            while (newUvs.Count < newVerts.Count)
+            {
+                int idx = newUvs.Count;
+                newUvs.Add(new Vector2(newVerts[idx].x, newVerts[idx].z));
+            }
+            if (newUvs.Count > newVerts.Count) newUvs.RemoveRange(newVerts.Count, newUvs.Count - newVerts.Count);
+
+            extrudedMesh.SetUVs(0, newUvs);
+            extrudedMesh.RecalculateNormals();
+            extrudedMesh.RecalculateBounds();
+            extrudedMesh.RecalculateTangents();
+
+            cadObject.SetMesh(extrudedMesh);
+            return true;
+        }
+
         private List<int> FindCoplanarFaceTriangles(Vector3[] verts, int[] tris, int startTri, Vector3 normal)
         {
             List<int> result = new List<int> { startTri };

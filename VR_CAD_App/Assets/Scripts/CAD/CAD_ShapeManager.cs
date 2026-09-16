@@ -83,6 +83,7 @@ namespace VRCAD.Core
             {
                 if (registeredObjects[i] != null)
                 {
+                    CADManagerHub.Instance?.OnShapeDeleted(registeredObjects[i]);
                     Destroy(registeredObjects[i].gameObject);
                 }
             }
