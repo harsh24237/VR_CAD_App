@@ -81,6 +81,11 @@ namespace VRCAD.Core
             constraintManager ??= GetComponentInChildren<CAD_ConstraintManager>() ?? gameObject.AddComponent<CAD_ConstraintManager>();
             exportManager ??= GetComponentInChildren<CAD_ExportManager>() ?? gameObject.AddComponent<CAD_ExportManager>();
             undoRedoManager ??= GetComponentInChildren<CAD_UndoRedoManager>() ?? gameObject.AddComponent<CAD_UndoRedoManager>();
+
+            if (FindObjectOfType<HapticFeedbackManager>() == null)
+                gameObject.AddComponent<HapticFeedbackManager>();
+            if ((Application.isEditor || Debug.isDebugBuild) && GetComponent<QuestBaselineRecorder>() == null)
+                gameObject.AddComponent<QuestBaselineRecorder>();
             
             // Add interaction handle manager for dynamic VR grabbing
             if (GetComponentInChildren<CAD_InteractionHandleManager>() == null)
@@ -691,13 +696,18 @@ namespace VRCAD.Core
 
         public void OnObjectGrabbed(CADObject obj, SelectEnterEventArgs args)
         {
-            selectionManager.Select(obj, new RaycastHit());
-            transformManager.StartObjectManipulation(obj);
+            if (obj == null) return;
+            string interactorName = args?.interactorObject?.transform != null ? args.interactorObject.transform.name : "Mouse/Desktop";
+            Debug.Log($"[QuestBaseline Interaction] Grab: {obj.name}; interactor={interactorName}");
+            selectionManager?.Select(obj, new RaycastHit());
+            transformManager?.StartObjectManipulation(obj);
         }
 
         public void OnObjectReleased(CADObject obj, SelectExitEventArgs args)
         {
-            transformManager.EndObjectManipulation(obj);
+            if (obj == null) return;
+            transformManager?.EndObjectManipulation(obj);
+            Debug.Log($"[QuestBaseline Interaction] Release: {obj.name}; position={obj.transform.position}");
         }
 
         public void OnShapeCreated(CADObject obj) => ShapeCreated?.Invoke(obj);

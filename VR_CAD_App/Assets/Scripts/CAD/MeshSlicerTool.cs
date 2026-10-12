@@ -12,6 +12,16 @@ namespace VRCAD.Tools
         public Camera mainCamera;
 
         private bool isActive = false;
+        public void SetActive(bool active)
+        {
+            isActive = active;
+            if (!active)
+            {
+                isPinchingBoth = false;
+                if (cutLine != null) cutLine.enabled = false;
+                if (previewPlane != null) previewPlane.SetActive(false);
+            }
+        }
         private bool isPinchingBoth = false;
 
         private LineRenderer cutLine;
@@ -81,9 +91,9 @@ namespace VRCAD.Tools
 
         private void Update()
         {
-            // Activate only if Perform Cut mode is active. (Mocking state from CADManagerHub)
-            // If the user selected "Perform Cut", we should enable this tool. 
-            // We can also poll CADManagerHub or just let this run.
+            // Gripping with both controllers must not silently cut the selected object.
+            if (!isActive) return;
+            // An explicit tool activation is required before accepting a cut gesture.
             
             if (leftController == null || rightController == null || mainCamera == null) return;
 

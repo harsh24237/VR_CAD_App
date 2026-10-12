@@ -67,18 +67,18 @@ namespace VRCAD.Core
             for (int i = 0; i < verts.Length; i++)
             {
                 Vector3 worldPt = t.TransformPoint(verts[i]);
-                sb.AppendLine($"v {worldPt.x:F5} {worldPt.y:F5} {worldPt.z:F5}");
+                sb.AppendLine(FormattableString.Invariant($"v {worldPt.x:F5} {worldPt.y:F5} {worldPt.z:F5}"));
             }
 
             for (int i = 0; i < norms.Length; i++)
             {
                 Vector3 worldNorm = t.TransformDirection(norms[i]);
-                sb.AppendLine($"vn {worldNorm.x:F5} {worldNorm.y:F5} {worldNorm.z:F5}");
+                sb.AppendLine(FormattableString.Invariant($"vn {worldNorm.x:F5} {worldNorm.y:F5} {worldNorm.z:F5}"));
             }
 
             for (int i = 0; i < uvs.Length; i++)
             {
-                sb.AppendLine($"vt {uvs[i].x:F5} {uvs[i].y:F5}");
+                sb.AppendLine(FormattableString.Invariant($"vt {uvs[i].x:F5} {uvs[i].y:F5}"));
             }
 
             sb.AppendLine($"g {cadObject.name}");
@@ -110,11 +110,11 @@ namespace VRCAD.Core
                 Vector3 v2 = t.TransformPoint(verts[tris[i + 2]]);
                 Vector3 normal = Vector3.Cross(v1 - v0, v2 - v0).normalized;
 
-                sb.AppendLine($"  facet normal {normal.x:e} {normal.y:e} {normal.z:e}");
+                sb.AppendLine(FormattableString.Invariant($"  facet normal {normal.x:e} {normal.y:e} {normal.z:e}"));
                 sb.AppendLine("    outer loop");
-                sb.AppendLine($"      vertex {v0.x:e} {v0.y:e} {v0.z:e}");
-                sb.AppendLine($"      vertex {v1.x:e} {v1.y:e} {v1.z:e}");
-                sb.AppendLine($"      vertex {v2.x:e} {v2.y:e} {v2.z:e}");
+                sb.AppendLine(FormattableString.Invariant($"      vertex {v0.x:e} {v0.y:e} {v0.z:e}"));
+                sb.AppendLine(FormattableString.Invariant($"      vertex {v1.x:e} {v1.y:e} {v1.z:e}"));
+                sb.AppendLine(FormattableString.Invariant($"      vertex {v2.x:e} {v2.y:e} {v2.z:e}"));
                 sb.AppendLine("    endloop");
                 sb.AppendLine("  endfacet");
             }

@@ -97,9 +97,16 @@ namespace VRCAD.Core
                 rb.interpolation = RigidbodyInterpolation.Interpolate;
             }
 
+            if (meshCollider != null)
+            {
+                meshCollider.convex = false;
+            }
+
             if (grabInteractable != null)
             {
-                grabInteractable.movementType = XRBaseInteractable.MovementType.VelocityTracking;
+                // Kinematic movement preserves isKinematic=true during XR grabbing,
+                // allowing non-convex MeshColliders without PhysX errors.
+                grabInteractable.movementType = XRBaseInteractable.MovementType.Kinematic;
                 grabInteractable.throwOnDetach = false;
                 grabInteractable.selectEntered.AddListener(OnSelectEntered);
                 grabInteractable.selectExited.AddListener(OnSelectExited);
@@ -144,7 +151,7 @@ namespace VRCAD.Core
             {
                 MeshCollider.sharedMesh = null;
                 MeshCollider.sharedMesh = newMesh;
-                MeshCollider.convex = true;
+                MeshCollider.convex = false;
             }
 
             if (isWireframeMode)

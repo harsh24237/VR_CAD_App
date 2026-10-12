@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using VRCAD.Core.CSG;
 
 namespace VRCAD.Core
 {
@@ -28,13 +29,44 @@ namespace VRCAD.Core
             Transform transA = targetObj.transform;
             Transform transB = toolObj.transform;
 
+            Matrix4x4 toolToTarget = transA.worldToLocalMatrix * transB.localToWorldMatrix;
+
+            // Check bounding overlap for non-overlapping subtract
+            Bounds boundsA = meshA.bounds;
+            Bounds boundsB = TransformBounds(meshB.bounds, toolToTarget);
+
+            if (!boundsA.Intersects(boundsB))
+            {
+                if (operation == BooleanOperation.Subtract)
+                {
+                    Debug.Log("[CAD_BooleanManager] Operands do not overlap; subtract skipped to preserve cutter.");
+                    CADManagerHub.Instance?.EmitStatus("Subtract aborted: shapes do not overlap. Cutter preserved.");
+                    return false;
+                }
+                else if (operation == BooleanOperation.Intersect)
+                {
+                    Debug.Log("[CAD_BooleanManager] Operands do not overlap; intersection is empty.");
+                    CADManagerHub.Instance?.EmitStatus("Intersect aborted: shapes do not overlap.");
+                    return false;
+                }
+                // For Union, disjoint meshes will be merged into a single multi-body object below
+            }
+
             Mesh resultMesh = ExecuteBooleanOperation(meshA, transA, meshB, transB, operation);
             if (resultMesh != null)
             {
+                var validation = CSGModel.ValidateMesh(resultMesh);
+                if (!validation.isValid)
+                {
+                    Debug.LogWarning($"[CAD_BooleanManager] Rejected invalid Boolean result: {validation.message}");
+                    CADManagerHub.Instance?.EmitStatus($"Boolean rejected: {validation.message}");
+                    return false;
+                }
+
                 targetObj.SetMesh(resultMesh);
                 CADManagerHub.Instance?.OnMeshModified(targetObj);
 
-                // If subtract or union, deactivate tool instead of destroying so it can be restored on Undo
+                // Deactivate and unregister tool only on successful modification
                 if (operation == BooleanOperation.Subtract || operation == BooleanOperation.Union)
                 {
                     toolObj.gameObject.SetActive(false);
@@ -51,7 +83,6 @@ namespace VRCAD.Core
         {
             if (targetObj == null) return false;
 
-            // Generate a tool cylinder representing the hole volume
             Mesh holeCylinder = CAD_ShapeManager.CreateCylinderMesh(radius, depth, radialSegments);
             GameObject tempTool = new GameObject("Temp_HoleTool");
             tempTool.transform.position = centerWorld;
@@ -70,6 +101,13 @@ namespace VRCAD.Core
 
             if (resultMesh != null)
             {
+                var validation = CSGModel.ValidateMesh(resultMesh);
+                if (!validation.isValid)
+                {
+                    Debug.LogWarning($"[CAD_BooleanManager] CutHole validation failed: {validation.message}");
+                    return false;
+                }
+
                 targetObj.SetMesh(resultMesh);
                 CADManagerHub.Instance?.OnMeshModified(targetObj);
                 return true;
@@ -78,230 +116,114 @@ namespace VRCAD.Core
             return false;
         }
 
-        private Mesh ExecuteBooleanOperation(Mesh meshA, Transform transA, Mesh meshB, Transform transB, BooleanOperation op)
+        public Mesh ExecuteBooleanOperation(Mesh meshA, Transform transA, Mesh meshB, Transform transB, BooleanOperation op)
         {
-            // Transform Mesh B into A's local space
-            Vector3[] vertsA = meshA.vertices;
-            int[] trisA = meshA.triangles;
+            if (meshA == null || meshB == null) return null;
 
-            Vector3[] vertsB = meshB.vertices;
-            int[] trisB = meshB.triangles;
+            Matrix4x4 toolToTarget = transA.worldToLocalMatrix * transB.localToWorldMatrix;
 
-            Vector3[] transformedVertsB = new Vector3[vertsB.Length];
-            for (int i = 0; i < vertsB.Length; i++)
-            {
-                Vector3 worldPt = transB.TransformPoint(vertsB[i]);
-                transformedVertsB[i] = transA.InverseTransformPoint(worldPt);
-            }
-
+            // Handle trivial disjoint Union by combining sub-meshes
             Bounds boundsA = meshA.bounds;
-            Bounds boundsB = new Bounds(transformedVertsB[0], Vector3.zero);
-            foreach (var p in transformedVertsB) boundsB.Encapsulate(p);
-
-            // If no bounding overlap, handle trivial cases
-            if (!boundsA.Intersects(boundsB))
+            Bounds boundsB = TransformBounds(meshB.bounds, toolToTarget);
+            if (!boundsA.Intersects(boundsB) && op == BooleanOperation.Union)
             {
-                if (op == BooleanOperation.Union)
-                {
-                    return CombineDisjointMeshes(vertsA, trisA, transformedVertsB, trisB);
-                }
-                if (op == BooleanOperation.Subtract)
-                {
-                    return UnityEngine.Object.Instantiate(meshA);
-                }
-                if (op == BooleanOperation.Intersect)
-                {
-                    return new Mesh { name = "Empty_Intersection" };
-                }
+                return CombineDisjointMeshes(meshA, meshB, toolToTarget);
             }
 
-            // Perform robust spatial volumetric partition
-            return ExecuteVolumetricCSG(meshA, vertsA, trisA, transformedVertsB, trisB, boundsA, boundsB, op);
+            CSGModel modelA = CSGModel.FromMesh(meshA, Matrix4x4.identity, 0);
+            CSGModel modelB = CSGModel.FromMesh(meshB, toolToTarget, 1);
+
+            CSGModel resultModel = op switch
+            {
+                BooleanOperation.Union => CSGModel.Union(modelA, modelB),
+                BooleanOperation.Subtract => CSGModel.Subtract(modelA, modelB),
+                BooleanOperation.Intersect => CSGModel.Intersect(modelA, modelB),
+                _ => null
+            };
+
+            if (resultModel == null || resultModel.polygons == null || resultModel.polygons.Count == 0)
+            {
+                return null;
+            }
+
+            Mesh resultMesh = resultModel.ToMesh($"CSG_{op}_Result");
+            if (resultMesh != null)
+            {
+                resultMesh.RecalculateNormals();
+                resultMesh.RecalculateBounds();
+                resultMesh.RecalculateTangents();
+            }
+
+            return resultMesh;
         }
 
-        private Mesh ExecuteVolumetricCSG(
-            Mesh meshA,
-            Vector3[] vertsA, int[] trisA,
-            Vector3[] vertsB, int[] trisB,
-            Bounds boundsA, Bounds boundsB,
-            BooleanOperation op)
+        private Mesh CombineDisjointMeshes(Mesh meshA, Mesh meshB, Matrix4x4 transformB)
         {
-            List<Vector3> outVerts = new List<Vector3>();
-            List<int> outTris = new List<int>();
+            Vector3[] vA = meshA.vertices;
+            Vector3[] nA = meshA.normals;
+            Vector2[] uvA = meshA.uv;
+            int[] tA = meshA.triangles;
 
-            Vector3 testDir = new Vector3(0.267f, 0.924f, 0.271f).normalized;
+            Vector3[] vB = meshB.vertices;
+            Vector3[] nB = meshB.normals;
+            Vector2[] uvB = meshB.uv;
+            int[] tB = meshB.triangles;
 
-            // Approximate volumetric signed distance / containment classifier
-            bool IsInsideB(Vector3 pt)
+            Matrix4x4 normalMatrixB = transformB.inverse.transpose;
+
+            var outVerts = new List<Vector3>(vA.Length + vB.Length);
+            var outNorms = new List<Vector3>(vA.Length + vB.Length);
+            var outUVs = new List<Vector2>(vA.Length + vB.Length);
+            var outTris = new List<int>(tA.Length + tB.Length);
+
+            outVerts.AddRange(vA);
+            outNorms.AddRange(nA != null && nA.Length == vA.Length ? nA : new Vector3[vA.Length]);
+            outUVs.AddRange(uvA != null && uvA.Length == vA.Length ? uvA : new Vector2[vA.Length]);
+            outTris.AddRange(tA);
+
+            int offset = vA.Length;
+            for (int i = 0; i < vB.Length; i++)
             {
-                if (!boundsB.Contains(pt)) return false;
-                int hits = 0;
-                Ray ray = new Ray(pt, testDir);
-                for (int t = 0; t < trisB.Length; t += 3)
-                {
-                    if (RayIntersectsTriangle(ray, vertsB[trisB[t]], vertsB[trisB[t + 1]], vertsB[trisB[t + 2]], out float dist))
-                    {
-                        if (dist > 0.0001f) hits++;
-                    }
-                }
-                return (hits % 2) == 1;
+                outVerts.Add(transformB.MultiplyPoint3x4(vB[i]));
+                Vector3 norm = nB != null && i < nB.Length ? normalMatrixB.MultiplyVector(nB[i]).normalized : Vector3.up;
+                outNorms.Add(norm);
+                outUVs.Add(uvB != null && i < uvB.Length ? uvB[i] : Vector2.zero);
             }
 
-            bool IsInsideA(Vector3 pt)
+            for (int i = 0; i < tB.Length; i++)
             {
-                if (!boundsA.Contains(pt)) return false;
-                int hits = 0;
-                Ray ray = new Ray(pt, testDir);
-                for (int t = 0; t < trisA.Length; t += 3)
-                {
-                    if (RayIntersectsTriangle(ray, vertsA[trisA[t]], vertsA[trisA[t + 1]], vertsA[trisA[t + 2]], out float dist))
-                    {
-                        if (dist > 0.0001f) hits++;
-                    }
-                }
-                return (hits % 2) == 1;
+                outTris.Add(tB[i] + offset);
             }
 
-            // Process Mesh A triangles
-            for (int t = 0; t < trisA.Length; t += 3)
-            {
-                Vector3 v0 = vertsA[trisA[t + 0]];
-                Vector3 v1 = vertsA[trisA[t + 1]];
-                Vector3 v2 = vertsA[trisA[t + 2]];
-                Vector3 centroid = (v0 + v1 + v2) / 3f;
-
-                bool insideB = IsInsideB(centroid);
-
-                bool keepA = op switch
-                {
-                    BooleanOperation.Union => !insideB,
-                    BooleanOperation.Subtract => !insideB,
-                    BooleanOperation.Intersect => insideB,
-                    _ => true
-                };
-
-                if (keepA)
-                {
-                    int start = outVerts.Count;
-                    outVerts.AddRange(new[] { v0, v1, v2 });
-                    outTris.AddRange(new[] { start, start + 1, start + 2 });
-                }
-            }
-
-            // Process Mesh B triangles
-            for (int t = 0; t < trisB.Length; t += 3)
-            {
-                Vector3 v0 = vertsB[trisB[t + 0]];
-                Vector3 v1 = vertsB[trisB[t + 1]];
-                Vector3 v2 = vertsB[trisB[t + 2]];
-                Vector3 centroid = (v0 + v1 + v2) / 3f;
-
-                bool insideA = IsInsideA(centroid);
-
-                bool keepB = op switch
-                {
-                    BooleanOperation.Union => !insideA,
-                    BooleanOperation.Subtract => insideA, // Invert normals for subtract cavity
-                    BooleanOperation.Intersect => insideA,
-                    _ => false
-                };
-
-                if (keepB)
-                {
-                    int start = outVerts.Count;
-                    outVerts.AddRange(new[] { v0, v1, v2 });
-
-                    if (op == BooleanOperation.Subtract)
-                    {
-                        // Invert winding order for interior walls
-                        outTris.AddRange(new[] { start, start + 2, start + 1 });
-                    }
-                    else
-                    {
-                        outTris.AddRange(new[] { start, start + 1, start + 2 });
-                    }
-                }
-            }
-
-            if (outVerts.Count == 0)
-            {
-                if (op == BooleanOperation.Union)
-                    return CombineDisjointMeshes(vertsA, trisA, vertsB, trisB);
-                return UnityEngine.Object.Instantiate(meshA);
-            }
-
-            Mesh result = new Mesh { name = $"CSG_{op}_Result" };
-            if (outVerts.Count > 65535)
+            Mesh result = new Mesh { name = "Combined_Disjoint_Mesh" };
+            if (outVerts.Count > 65534)
             {
                 result.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
             }
 
             result.SetVertices(outVerts);
+            result.SetNormals(outNorms);
+            result.SetUVs(0, outUVs);
             result.SetTriangles(outTris, 0);
 
-            Vector2[] csgUVs = new Vector2[outVerts.Count];
-            for (int i = 0; i < outVerts.Count; i++)
-            {
-                csgUVs[i] = new Vector2(outVerts[i].x, outVerts[i].z);
-            }
-            result.SetUVs(0, csgUVs);
-
-            result.RecalculateNormals();
             result.RecalculateBounds();
             result.RecalculateTangents();
-
             return result;
         }
 
-        private Mesh CombineDisjointMeshes(Vector3[] vA, int[] tA, Vector3[] vB, int[] tB)
+        public static Bounds TransformBounds(Bounds localBounds, Matrix4x4 matrix)
         {
-            Mesh mesh = new Mesh { name = "Combined_Disjoint" };
-            List<Vector3> verts = new List<Vector3>(vA);
-            List<int> tris = new List<int>(tA);
-
-            int offset = verts.Count;
-            verts.AddRange(vB);
-            for (int i = 0; i < tB.Length; i++)
-            {
-                tris.Add(tB[i] + offset);
-            }
-
-            mesh.SetVertices(verts);
-            mesh.SetTriangles(tris, 0);
-
-            Vector2[] combUVs = new Vector2[verts.Count];
-            for (int i = 0; i < verts.Count; i++)
-            {
-                combUVs[i] = new Vector2(verts[i].x, verts[i].z);
-            }
-            mesh.SetUVs(0, combUVs);
-
-            mesh.RecalculateNormals();
-            mesh.RecalculateBounds();
-            return mesh;
-        }
-
-        private bool RayIntersectsTriangle(Ray ray, Vector3 v0, Vector3 v1, Vector3 v2, out float distance)
-        {
-            distance = 0f;
-            Vector3 e1 = v1 - v0;
-            Vector3 e2 = v2 - v0;
-            Vector3 pvec = Vector3.Cross(ray.direction, e2);
-            float det = Vector3.Dot(e1, pvec);
-
-            if (Mathf.Abs(det) < 1e-8f) return false;
-
-            float invDet = 1.0f / det;
-            Vector3 tvec = ray.origin - v0;
-            float u = Vector3.Dot(tvec, pvec) * invDet;
-            if (u < 0.0f || u > 1.0f) return false;
-
-            Vector3 qvec = Vector3.Cross(tvec, e1);
-            float v = Vector3.Dot(ray.direction, qvec) * invDet;
-            if (v < 0.0f || u + v > 1.0f) return false;
-
-            distance = Vector3.Dot(e2, qvec) * invDet;
-            return distance > 0.0f;
+            Vector3 center = matrix.MultiplyPoint3x4(localBounds.center);
+            Vector3 extents = localBounds.extents;
+            Vector3 axisX = matrix.MultiplyVector(new Vector3(extents.x, 0, 0));
+            Vector3 axisY = matrix.MultiplyVector(new Vector3(0, extents.y, 0));
+            Vector3 axisZ = matrix.MultiplyVector(new Vector3(0, 0, extents.z));
+            Vector3 newExtents = new Vector3(
+                Mathf.Abs(axisX.x) + Mathf.Abs(axisY.x) + Mathf.Abs(axisZ.x),
+                Mathf.Abs(axisX.y) + Mathf.Abs(axisY.y) + Mathf.Abs(axisZ.y),
+                Mathf.Abs(axisX.z) + Mathf.Abs(axisY.z) + Mathf.Abs(axisZ.z)
+            );
+            return new Bounds(center, newExtents * 2f);
         }
     }
 }
