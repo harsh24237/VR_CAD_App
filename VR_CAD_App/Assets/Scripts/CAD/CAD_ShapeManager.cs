@@ -229,8 +229,8 @@ namespace VRCAD.Core
             {
                 int next = (i + 1) % segments;
                 tris.Add(topCenterIdx);
-                tris.Add(topRingStart + i);
                 tris.Add(topRingStart + next);
+                tris.Add(topRingStart + i);
             }
 
             // Bottom Cap
@@ -254,8 +254,8 @@ namespace VRCAD.Core
             {
                 int next = (i + 1) % segments;
                 tris.Add(bottomCenterIdx);
-                tris.Add(botRingStart + next);
                 tris.Add(botRingStart + i);
+                tris.Add(botRingStart + next);
             }
 
             mesh.SetVertices(verts);

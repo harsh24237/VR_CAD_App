@@ -6,7 +6,7 @@ namespace VRCAD.Core.CSG
 {
     public struct CSGPlane
     {
-        public const float Epsilon = 1e-5f;
+        public const float Epsilon = CSGTolerance.PlaneEpsilon;
 
         public Vector3 normal;
         public float w;
@@ -144,8 +144,8 @@ namespace VRCAD.Core.CSG
                         }
                     }
 
-                    if (f.Count >= 3) front.Add(new CSGPolygon(f, polygon.sharedData));
-                    if (b.Count >= 3) back.Add(new CSGPolygon(b, polygon.sharedData));
+                    if (f.Count >= 3) front.Add(new CSGPolygon(f, polygon.plane, polygon.sharedData));
+                    if (b.Count >= 3) back.Add(new CSGPolygon(b, polygon.plane, polygon.sharedData));
                     break;
             }
         }

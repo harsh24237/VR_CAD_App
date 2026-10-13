@@ -107,9 +107,15 @@ namespace VRCAD.Core.CSG
             return result;
         }
 
-        public void Build(List<CSGPolygon> list)
+        public void Build(List<CSGPolygon> list, int depth = 0)
         {
             if (list == null || list.Count == 0) return;
+
+            if (depth > 500)
+            {
+                polygons.AddRange(list);
+                return;
+            }
 
             if (!plane.HasValue)
             {
@@ -128,13 +134,13 @@ namespace VRCAD.Core.CSG
             if (f.Count > 0)
             {
                 if (front == null) front = new CSGNode();
-                front.Build(f);
+                front.Build(f, depth + 1);
             }
 
             if (b.Count > 0)
             {
                 if (back == null) back = new CSGNode();
-                back.Build(b);
+                back.Build(b, depth + 1);
             }
         }
     }

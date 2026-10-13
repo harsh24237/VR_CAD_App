@@ -12,6 +12,11 @@ namespace VRCAD.Core.CSG
         public int openEdgeCount;
         public int nonManifoldEdgeCount;
         public int degenerateTriangleCount;
+        public int duplicateTriangleCount;
+        public int inconsistentWindingCount;
+        public int tJunctionCount;
+        public int connectedComponentCount;
+        public bool hasNonFiniteCoordinates;
         public string message;
     }
 
@@ -52,14 +57,16 @@ namespace VRCAD.Core.CSG
             bool hasUVs = srcUVs != null && srcUVs.Length == srcVerts.Length;
 
             Matrix4x4 normalMatrix = matrix.inverse.transpose;
+            bool isMirrored = matrix.determinant < 0f;
 
             var resultPolygons = new List<CSGPolygon>(srcTris.Length / 3);
 
             for (int i = 0; i < srcTris.Length; i += 3)
             {
+                // Invert winding if the matrix has a negative determinant (mirrored/reflected transform)
                 int i0 = srcTris[i];
-                int i1 = srcTris[i + 1];
-                int i2 = srcTris[i + 2];
+                int i1 = isMirrored ? srcTris[i + 2] : srcTris[i + 1];
+                int i2 = isMirrored ? srcTris[i + 1] : srcTris[i + 2];
 
                 Vector3 p0 = matrix.MultiplyPoint3x4(srcVerts[i0]);
                 Vector3 p1 = matrix.MultiplyPoint3x4(srcVerts[i1]);
@@ -90,7 +97,7 @@ namespace VRCAD.Core.CSG
                 };
 
                 var poly = new CSGPolygon(polyVerts, sharedData);
-                if (poly.CalculateArea() > 1e-9f)
+                if (poly.CalculateArea() > CSGTolerance.TriangleAreaEpsilon)
                 {
                     resultPolygons.Add(poly);
                 }
@@ -173,15 +180,281 @@ namespace VRCAD.Core.CSG
             return b;
         }
 
+        #region Spatial Vertex Welding & Mesh Generation
+
+        private struct RenderVertexKey : IEquatable<RenderVertexKey>
+        {
+            public readonly int x;
+            public readonly int y;
+            public readonly int z;
+
+            public RenderVertexKey(int x, int y, int z)
+            {
+                this.x = x;
+                this.y = y;
+                this.z = z;
+            }
+
+            public RenderVertexKey(Vector3 pos, float cellSize)
+            {
+                x = Mathf.FloorToInt(pos.x / cellSize);
+                y = Mathf.FloorToInt(pos.y / cellSize);
+                z = Mathf.FloorToInt(pos.z / cellSize);
+            }
+
+            public bool Equals(RenderVertexKey other) => x == other.x && y == other.y && z == other.z;
+
+            public override bool Equals(object obj) => obj is RenderVertexKey other && Equals(other);
+
+            public override int GetHashCode()
+            {
+                unchecked
+                {
+                    int hash = 17;
+                    hash = hash * 31 + x;
+                    hash = hash * 31 + y;
+                    hash = hash * 31 + z;
+                    return hash;
+                }
+            }
+        }
+
+        private static void ResolveTJunctions(List<CSGPolygon> polyList)
+        {
+            if (polyList == null || polyList.Count < 2) return;
+
+            float epsSqr = CSGTolerance.DistanceEpsilonSqr;
+            float planeEps = CSGTolerance.PlaneEpsilon;
+
+            // 1. Collect all distinct vertex positions from all polygons
+            var candidatePoints = new List<Vector3>();
+            for (int p = 0; p < polyList.Count; p++)
+            {
+                var vList = polyList[p].vertices;
+                if (vList == null) continue;
+                for (int i = 0; i < vList.Count; i++)
+                {
+                    Vector3 pt = vList[i].position;
+                    bool exists = false;
+                    for (int c = 0; c < candidatePoints.Count; c++)
+                    {
+                        if ((candidatePoints[c] - pt).sqrMagnitude <= epsSqr)
+                        {
+                            exists = true;
+                            break;
+                        }
+                    }
+                    if (!exists)
+                    {
+                        candidatePoints.Add(pt);
+                    }
+                }
+            }
+
+            // 2. For each polygon, check each edge and insert collinear candidate vertices
+            for (int p = 0; p < polyList.Count; p++)
+            {
+                var poly = polyList[p];
+                var verts = poly.vertices;
+                if (verts == null || verts.Count < 3) continue;
+
+                var newVerts = new List<CSGVertex>(verts.Count + 4);
+
+                for (int i = 0; i < verts.Count; i++)
+                {
+                    CSGVertex vCurrent = verts[i];
+                    CSGVertex vNext = verts[(i + 1) % verts.Count];
+                    newVerts.Add(vCurrent);
+
+                    Vector3 pA = vCurrent.position;
+                    Vector3 pB = vNext.position;
+                    Vector3 ab = pB - pA;
+                    float abLenSqr = ab.sqrMagnitude;
+                    if (abLenSqr < 1e-8f) continue;
+                    float abLen = Mathf.Sqrt(abLenSqr);
+
+                    var edgeSplits = new List<(float t, Vector3 pt)>();
+
+                    for (int k = 0; k < candidatePoints.Count; k++)
+                    {
+                        Vector3 pt = candidatePoints[k];
+
+                        // Check distance to endpoints
+                        if ((pt - pA).sqrMagnitude <= epsSqr || (pt - pB).sqrMagnitude <= epsSqr)
+                            continue;
+
+                        // Must be coplanar with the polygon's surface
+                        if (Mathf.Abs(Vector3.Dot(poly.plane.normal, pt) - poly.plane.w) > CSGTolerance.DistanceEpsilon)
+                            continue;
+
+                        // Check if projection lies strictly interior to segment by physical distance tolerance
+                        float t = Vector3.Dot(pt - pA, ab) / abLenSqr;
+                        float distA = t * abLen;
+                        float distB = (1f - t) * abLen;
+
+                        if (distA > CSGTolerance.DistanceEpsilon && distB > CSGTolerance.DistanceEpsilon)
+                        {
+                            Vector3 proj = pA + t * ab;
+                            if ((pt - proj).sqrMagnitude <= epsSqr)
+                            {
+                                bool alreadyAdded = false;
+                                for (int s = 0; s < edgeSplits.Count; s++)
+                                {
+                                    if ((edgeSplits[s].pt - proj).sqrMagnitude <= epsSqr || Mathf.Abs(edgeSplits[s].t - t) < 1e-4f)
+                                    {
+                                        alreadyAdded = true;
+                                        break;
+                                    }
+                                }
+                                if (!alreadyAdded)
+                                {
+                                    edgeSplits.Add((t, proj));
+                                }
+                            }
+                        }
+                    }
+
+                    if (edgeSplits.Count > 0)
+                    {
+                        edgeSplits.Sort((x, y) => x.t.CompareTo(y.t));
+                        for (int s = 0; s < edgeSplits.Count; s++)
+                        {
+                            CSGVertex interp = CSGVertex.Lerp(vCurrent, vNext, edgeSplits[s].t);
+                            interp.position = edgeSplits[s].pt; // exact collinear edge projection
+                            newVerts.Add(interp);
+                        }
+                    }
+                }
+
+                poly.vertices = newVerts;
+            }
+        }
+
         public Mesh ToMesh(string meshName = "CSG_Result")
         {
+            if (polygons == null || polygons.Count == 0) return null;
+
+            ResolveTJunctions(polygons);
+
             var outPositions = new List<Vector3>();
             var outNormals = new List<Vector3>();
             var outUVs = new List<Vector2>();
             var outTriangles = new List<int>();
 
-            // Spatial welding map to share vertices across polygon fans while preserving hard edges
-            var vertexMap = new Dictionary<long, int>();
+            // Collision-safe spatial welding bucket map
+            float cellSize = 0.002f;
+            var spatialBuckets = new Dictionary<RenderVertexKey, List<int>>();
+            var geomIds = new List<int>();
+            var distinctGeomPositions = new List<Vector3>();
+            var geomBuckets = new Dictionary<RenderVertexKey, List<int>>();
+
+            int GetGeomId(Vector3 pos)
+            {
+                RenderVertexKey key = new RenderVertexKey(pos, cellSize);
+                for (int dx = -1; dx <= 1; dx++)
+                {
+                    for (int dy = -1; dy <= 1; dy++)
+                    {
+                        for (int dz = -1; dz <= 1; dz++)
+                        {
+                            RenderVertexKey testKey = new RenderVertexKey(key.x + dx, key.y + dy, key.z + dz);
+                            if (geomBuckets.TryGetValue(testKey, out var list))
+                            {
+                                for (int b = 0; b < list.Count; b++)
+                                {
+                                    int id = list[b];
+                                    if ((pos - distinctGeomPositions[id]).sqrMagnitude <= CSGTolerance.DistanceEpsilonSqr)
+                                        return id;
+                                }
+                            }
+                        }
+                    }
+                }
+                int newId = distinctGeomPositions.Count;
+                distinctGeomPositions.Add(pos);
+                if (!geomBuckets.TryGetValue(key, out var bucket))
+                {
+                    bucket = new List<int>(4);
+                    geomBuckets[key] = bucket;
+                }
+                bucket.Add(newId);
+                return newId;
+            }
+
+            int FindOrAddVertex(CSGVertex cv)
+            {
+                RenderVertexKey centerKey = new RenderVertexKey(cv.position, cellSize);
+
+                // Search center cell and 26 neighbor cells for exact Euclidean match
+                for (int dx = -1; dx <= 1; dx++)
+                {
+                    for (int dy = -1; dy <= 1; dy++)
+                    {
+                        for (int dz = -1; dz <= 1; dz++)
+                        {
+                            RenderVertexKey testKey = new RenderVertexKey(centerKey.x + dx, centerKey.y + dy, centerKey.z + dz);
+
+                            if (spatialBuckets.TryGetValue(testKey, out var bucket))
+                            {
+                                for (int b = 0; b < bucket.Count; b++)
+                                {
+                                    int existingIdx = bucket[b];
+                                    Vector3 ep = outPositions[existingIdx];
+                                    Vector3 en = outNormals[existingIdx];
+                                    Vector2 euv = outUVs[existingIdx];
+
+                                    // Attribute compatibility check: position, normal (hard edge guard), and UV seam guard
+                                    if ((cv.position - ep).sqrMagnitude <= CSGTolerance.DistanceEpsilonSqr &&
+                                        Vector3.Dot(cv.normal, en) >= CSGTolerance.NormalDotEpsilon &&
+                                        (cv.uv - euv).sqrMagnitude <= (CSGTolerance.UVEpsilon * CSGTolerance.UVEpsilon))
+                                    {
+                                        return existingIdx;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                int newIndex = outPositions.Count;
+                outPositions.Add(cv.position);
+                outNormals.Add(cv.normal);
+                outUVs.Add(cv.uv);
+                geomIds.Add(GetGeomId(cv.position));
+
+                if (!spatialBuckets.TryGetValue(centerKey, out var list))
+                {
+                    list = new List<int>(4);
+                    spatialBuckets[centerKey] = list;
+                }
+                list.Add(newIndex);
+
+                return newIndex;
+            }
+
+            var seenGeomTriangles = new HashSet<(int, int, int)>();
+
+            void EmitTriangle(int i0, int i1, int i2)
+            {
+                if (i0 == i1 || i1 == i2 || i0 == i2) return;
+
+                int g0 = geomIds[i0];
+                int g1 = geomIds[i1];
+                int g2 = geomIds[i2];
+                if (g0 == g1 || g1 == g2 || g0 == g2) return; // Geometrically collapsed!
+
+                int minG = Mathf.Min(g0, Mathf.Min(g1, g2));
+                int maxG = Mathf.Max(g0, Mathf.Max(g1, g2));
+                int midG = (g0 + g1 + g2) - minG - maxG;
+                if (!seenGeomTriangles.Add((minG, midG, maxG)))
+                {
+                    return; // Duplicate geometric triangle! Filter it out!
+                }
+
+                outTriangles.Add(i0);
+                outTriangles.Add(i1);
+                outTriangles.Add(i2);
+            }
 
             for (int p = 0; p < polygons.Count; p++)
             {
@@ -189,62 +462,140 @@ namespace VRCAD.Core.CSG
                 var rawVerts = poly.vertices;
                 if (rawVerts == null || rawVerts.Count < 3) continue;
 
-                // 1. Remove consecutive near-duplicate vertices
+                // 1. Filter out consecutive near-coincident vertices
                 var cleanVerts = new List<CSGVertex>(rawVerts.Count);
                 for (int i = 0; i < rawVerts.Count; i++)
                 {
                     CSGVertex cur = rawVerts[i];
                     CSGVertex prev = (cleanVerts.Count > 0) ? cleanVerts[cleanVerts.Count - 1] : rawVerts[rawVerts.Count - 1];
-                    if ((cur.position - prev.position).sqrMagnitude > 1e-10f)
+                    if ((cur.position - prev.position).sqrMagnitude > 1e-12f)
                     {
                         cleanVerts.Add(cur);
                     }
                 }
 
-                if (cleanVerts.Count < 3) continue;
-
-                // 2. Check non-degenerate polygon area
-                float area = poly.CalculateArea();
-                if (area < 1e-8f) continue;
-
-                // 3. Triangulate convex polygon as triangle fan
-                int[] polyIndices = new int[cleanVerts.Count];
-                for (int i = 0; i < cleanVerts.Count; i++)
+                // Also check last vs first
+                if (cleanVerts.Count >= 3)
                 {
-                    CSGVertex cv = cleanVerts[i];
-                    long key = GetVertexKey(cv.position, cv.normal, cv.uv);
-
-                    if (vertexMap.TryGetValue(key, out int existingIndex))
+                    if ((cleanVerts[cleanVerts.Count - 1].position - cleanVerts[0].position).sqrMagnitude <= 1e-12f)
                     {
-                        polyIndices[i] = existingIndex;
-                    }
-                    else
-                    {
-                        int newIndex = outPositions.Count;
-                        outPositions.Add(cv.position);
-                        outNormals.Add(cv.normal);
-                        outUVs.Add(cv.uv);
-                        vertexMap[key] = newIndex;
-                        polyIndices[i] = newIndex;
+                        cleanVerts.RemoveAt(cleanVerts.Count - 1);
                     }
                 }
 
-                for (int i = 1; i < cleanVerts.Count - 1; i++)
+                if (cleanVerts.Count < 3) continue;
+
+                // 2. Register vertices through collision-safe welding
+                int[] polyIndices = new int[cleanVerts.Count];
+                for (int i = 0; i < cleanVerts.Count; i++)
                 {
-                    int idx0 = polyIndices[0];
-                    int idx1 = polyIndices[i];
-                    int idx2 = polyIndices[i + 1];
+                    polyIndices[i] = FindOrAddVertex(cleanVerts[i]);
+                }
 
-                    // Guard against degenerate triangle indices
-                    if (idx0 == idx1 || idx1 == idx2 || idx0 == idx2) continue;
+                // 3. Triangulate planar convex polygon using optimal-anchor fan, or centroid fan if edges are split
+                int n = cleanVerts.Count;
+                if (n == 3)
+                {
+                    int i0 = polyIndices[0];
+                    int i1 = polyIndices[1];
+                    int i2 = polyIndices[2];
+                    if (i0 != i1 && i1 != i2 && i0 != i2)
+                    {
+                        Vector3 e1 = outPositions[i1] - outPositions[i0];
+                        Vector3 e2 = outPositions[i2] - outPositions[i0];
+                        Vector3 norm = Vector3.Cross(e1, e2);
+                        if (norm.sqrMagnitude >= CSGTolerance.TriangleAreaEpsilon * CSGTolerance.TriangleAreaEpsilon * 4f)
+                        {
+                            if (Vector3.Dot(norm, poly.plane.normal) > 0f)
+                            {
+                                EmitTriangle(i0, i1, i2);
+                            }
+                            else
+                            {
+                                EmitTriangle(i0, i2, i1);
+                            }
+                        }
+                    }
+                    continue;
+                }
 
-                    Vector3 edgeA = outPositions[idx1] - outPositions[idx0];
-                    Vector3 edgeB = outPositions[idx2] - outPositions[idx0];
-                    if (Vector3.Cross(edgeA, edgeB).sqrMagnitude < 1e-14f) continue;
+                // For n >= 4, first check if any anchor provides all strictly positive-area triangles
+                int bestAnchor = -1;
+                float bestMinArea = -1f;
+                float areaThresholdSqr = CSGTolerance.TriangleAreaEpsilon * CSGTolerance.TriangleAreaEpsilon * 4f;
 
-                    outTriangles.Add(idx0);
-                    outTriangles.Add(idx1);
-                    outTriangles.Add(idx2);
+                for (int a = 0; a < n; a++)
+                {
+                    float minArea = float.MaxValue;
+                    Vector3 pa = outPositions[polyIndices[a]];
+
+                    for (int i = 1; i < n - 1; i++)
+                    {
+                        Vector3 pb = outPositions[polyIndices[(a + i) % n]];
+                        Vector3 pc = outPositions[polyIndices[(a + i + 1) % n]];
+                        Vector3 cross = Vector3.Cross(pb - pa, pc - pa);
+                        if (Vector3.Dot(cross, poly.plane.normal) <= 0f)
+                        {
+                            minArea = -1f;
+                            break;
+                        }
+                        float areaSqr = cross.sqrMagnitude;
+                        if (areaSqr < minArea) minArea = areaSqr;
+                    }
+
+                    if (minArea > areaThresholdSqr && minArea > bestMinArea)
+                    {
+                        bestMinArea = minArea;
+                        bestAnchor = a;
+                    }
+                }
+
+                if (bestAnchor >= 0)
+                {
+                    int idx0 = polyIndices[bestAnchor];
+                    for (int i = 1; i < n - 1; i++)
+                    {
+                        int idx1 = polyIndices[(bestAnchor + i) % n];
+                        int idx2 = polyIndices[(bestAnchor + i + 1) % n];
+                        EmitTriangle(idx0, idx1, idx2);
+                    }
+                }
+                else
+                {
+                    // If no perimeter anchor provides non-degenerate triangles (e.g. collinear split vertices on edges),
+                    // triangulate using a centroid fan to guarantee positive area for all perimeter segments without skipping edges.
+                    Vector3 centerPos = Vector3.zero;
+                    Vector2 centerUV = Vector2.zero;
+                    for (int i = 0; i < n; i++)
+                    {
+                        centerPos += outPositions[polyIndices[i]];
+                        centerUV += outUVs[polyIndices[i]];
+                    }
+                    centerPos /= n;
+                    centerUV /= n;
+
+                    int centerIdx = FindOrAddVertex(new CSGVertex(centerPos, poly.plane.normal, centerUV));
+
+                    for (int i = 0; i < n; i++)
+                    {
+                        int idx1 = polyIndices[i];
+                        int idx2 = polyIndices[(i + 1) % n];
+                        if (idx1 == idx2 || idx1 == centerIdx || idx2 == centerIdx) continue;
+
+                        Vector3 e1 = outPositions[idx1] - outPositions[centerIdx];
+                        Vector3 e2 = outPositions[idx2] - outPositions[centerIdx];
+                        Vector3 normal = Vector3.Cross(e1, e2);
+                        if (normal.sqrMagnitude < areaThresholdSqr) continue;
+
+                        if (Vector3.Dot(normal, poly.plane.normal) > 0f)
+                        {
+                            EmitTriangle(centerIdx, idx1, idx2);
+                        }
+                        else
+                        {
+                            EmitTriangle(centerIdx, idx2, idx1);
+                        }
+                    }
                 }
             }
 
@@ -270,30 +621,11 @@ namespace VRCAD.Core.CSG
             return mesh;
         }
 
-        private static long GetVertexKey(Vector3 pos, Vector3 norm, Vector2 uv)
-        {
-            // Quantize to 0.1 mm precision for robust topological welding
-            int x = Mathf.RoundToInt(pos.x * 10000f);
-            int y = Mathf.RoundToInt(pos.y * 10000f);
-            int z = Mathf.RoundToInt(pos.z * 10000f);
-            int nx = Mathf.RoundToInt(norm.x * 100f);
-            int ny = Mathf.RoundToInt(norm.y * 100f);
-            int nz = Mathf.RoundToInt(norm.z * 100f);
+        #endregion
 
-            unchecked
-            {
-                long hash = 17;
-                hash = hash * 31 + x;
-                hash = hash * 31 + y;
-                hash = hash * 31 + z;
-                hash = hash * 31 + nx;
-                hash = hash * 31 + ny;
-                hash = hash * 31 + nz;
-                return hash;
-            }
-        }
+        #region Strict Mesh Validation
 
-        public static CSGValidationResult ValidateMesh(Mesh mesh)
+        public static CSGValidationResult ValidateMesh(Mesh mesh, bool allowOpenBoundaries = false)
         {
             var result = new CSGValidationResult
             {
@@ -303,6 +635,11 @@ namespace VRCAD.Core.CSG
                 openEdgeCount = 0,
                 nonManifoldEdgeCount = 0,
                 degenerateTriangleCount = 0,
+                duplicateTriangleCount = 0,
+                inconsistentWindingCount = 0,
+                tJunctionCount = 0,
+                connectedComponentCount = 0,
+                hasNonFiniteCoordinates = false,
                 message = ""
             };
 
@@ -318,93 +655,321 @@ namespace VRCAD.Core.CSG
             result.vertexCount = verts.Length;
             result.triangleCount = tris.Length / 3;
 
-            if (verts.Length < 4 || tris.Length < 12)
+            if (verts.Length < 4 || tris.Length < 12 || (tris.Length % 3 != 0))
             {
-                result.message = $"Insufficient geometry (vertices: {verts.Length}, triangles: {tris.Length / 3})";
+                result.message = $"Insufficient geometry for closed solid (vertices: {verts.Length}, triangles: {tris.Length / 3})";
                 return result;
             }
 
-            // Check degenerate triangles
+            // 1. Check for non-finite coordinates (NaN / Infinity) and out-of-range indices
+            for (int i = 0; i < verts.Length; i++)
+            {
+                Vector3 v = verts[i];
+                if (float.IsNaN(v.x) || float.IsNaN(v.y) || float.IsNaN(v.z) ||
+                    float.IsInfinity(v.x) || float.IsInfinity(v.y) || float.IsInfinity(v.z))
+                {
+                    result.hasNonFiniteCoordinates = true;
+                    result.message = $"Non-finite vertex coordinate detected at index {i}";
+                    return result;
+                }
+            }
+
+            for (int i = 0; i < tris.Length; i++)
+            {
+                int idx = tris[i];
+                if (idx < 0 || idx >= verts.Length)
+                {
+                    result.message = $"Triangle index {idx} out of range [0, {verts.Length - 1}]";
+                    return result;
+                }
+            }
+
+            // 2. Identify Geometric Vertices (cluster coincident render vertices within scale-aware tolerance)
+            float geomTolerance = CSGTolerance.GetScaleAwareDistanceTolerance(mesh.bounds);
+            float geomTolSqr = geomTolerance * geomTolerance;
+            float geomCellSize = Mathf.Max(geomTolerance * 2f, 0.002f);
+
+            var geomBuckets = new Dictionary<RenderVertexKey, List<int>>();
+            int[] remappedGeom = new int[verts.Length];
+            var distinctGeomPositions = new List<Vector3>();
+
+            for (int i = 0; i < verts.Length; i++)
+            {
+                Vector3 p = verts[i];
+                RenderVertexKey centerKey = new RenderVertexKey(p, geomCellSize);
+                int geomId = -1;
+
+                for (int dx = -1; dx <= 1 && geomId < 0; dx++)
+                {
+                    for (int dy = -1; dy <= 1 && geomId < 0; dy++)
+                    {
+                        for (int dz = -1; dz <= 1 && geomId < 0; dz++)
+                        {
+                            RenderVertexKey testKey = new RenderVertexKey(centerKey.x + dx, centerKey.y + dy, centerKey.z + dz);
+
+                            if (geomBuckets.TryGetValue(testKey, out var bucket))
+                            {
+                                for (int b = 0; b < bucket.Count; b++)
+                                {
+                                    int candidateGeomId = bucket[b];
+                                    if ((p - distinctGeomPositions[candidateGeomId]).sqrMagnitude <= geomTolSqr)
+                                    {
+                                        geomId = candidateGeomId;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (geomId < 0)
+                {
+                    geomId = distinctGeomPositions.Count;
+                    distinctGeomPositions.Add(p);
+
+                    if (!geomBuckets.TryGetValue(centerKey, out var list))
+                    {
+                        list = new List<int>(4);
+                        geomBuckets[centerKey] = list;
+                    }
+                    list.Add(geomId);
+                }
+
+                remappedGeom[i] = geomId;
+            }
+
+            // 3. Degenerate Triangles and Duplicate Triangles Analysis
+            var seenTriangles = new HashSet<(int, int, int)>();
+
             for (int t = 0; t < tris.Length; t += 3)
             {
-                int i0 = tris[t];
-                int i1 = tris[t + 1];
-                int i2 = tris[t + 2];
-                if (i0 == i1 || i1 == i2 || i0 == i2)
+                int g0 = remappedGeom[tris[t]];
+                int g1 = remappedGeom[tris[t + 1]];
+                int g2 = remappedGeom[tris[t + 2]];
+
+                // Geometric collapse
+                if (g0 == g1 || g1 == g2 || g0 == g2)
                 {
                     result.degenerateTriangleCount++;
                     continue;
                 }
 
-                Vector3 a = verts[i0];
-                Vector3 b = verts[i1];
-                Vector3 c = verts[i2];
-                if (Vector3.Cross(b - a, c - a).sqrMagnitude < 1e-12f)
+                // Geometric zero-area check
+                Vector3 a = distinctGeomPositions[g0];
+                Vector3 b = distinctGeomPositions[g1];
+                Vector3 c = distinctGeomPositions[g2];
+                if (Vector3.Cross(b - a, c - a).sqrMagnitude < (CSGTolerance.TriangleAreaEpsilon * CSGTolerance.TriangleAreaEpsilon * 4f))
                 {
                     result.degenerateTriangleCount++;
+                    continue;
                 }
-            }
 
-            // Topology / Edge connectivity analysis
-            // Quantize vertex coordinates to group coincident vertices
-            var quantMap = new Dictionary<long, int>();
-            int[] remapped = new int[verts.Length];
-            for (int i = 0; i < verts.Length; i++)
-            {
-                int qx = Mathf.RoundToInt(verts[i].x * 1000f);
-                int qy = Mathf.RoundToInt(verts[i].y * 1000f);
-                int qz = Mathf.RoundToInt(verts[i].z * 1000f);
-                long key = ((long)qx << 40) ^ ((long)qy << 20) ^ (long)qz;
+                // Canonical triangle key for duplicate detection
+                int minG = Mathf.Min(g0, Mathf.Min(g1, g2));
+                int maxG = Mathf.Max(g0, Mathf.Max(g1, g2));
+                int midG = (g0 + g1 + g2) - minG - maxG;
+                var triKey = (minG, midG, maxG);
 
-                if (!quantMap.TryGetValue(key, out int rep))
+                if (!seenTriangles.Add(triKey))
                 {
-                    rep = i;
-                    quantMap[key] = rep;
+                    result.duplicateTriangleCount++;
                 }
-                remapped[i] = rep;
             }
 
-            var edgeUsage = new Dictionary<(int, int), int>();
+            // 4. Undirected Edge Connectivity & Directed Winding Analysis
+            var edgeIncidentHalfEdges = new Dictionary<(int, int), List<(int from, int to, int triIdx)>>();
+
             for (int t = 0; t < tris.Length; t += 3)
             {
-                int r0 = remapped[tris[t]];
-                int r1 = remapped[tris[t + 1]];
-                int r2 = remapped[tris[t + 2]];
+                int g0 = remappedGeom[tris[t]];
+                int g1 = remappedGeom[tris[t + 1]];
+                int g2 = remappedGeom[tris[t + 2]];
 
-                if (r0 == r1 || r1 == r2 || r0 == r2) continue;
+                if (g0 == g1 || g1 == g2 || g0 == g2) continue;
 
-                AddEdge(edgeUsage, r0, r1);
-                AddEdge(edgeUsage, r1, r2);
-                AddEdge(edgeUsage, r2, r0);
+                AddDirectedEdge(edgeIncidentHalfEdges, g0, g1, t);
+                AddDirectedEdge(edgeIncidentHalfEdges, g1, g2, t);
+                AddDirectedEdge(edgeIncidentHalfEdges, g2, g0, t);
             }
 
-            foreach (var kvp in edgeUsage)
+            foreach (var kvp in edgeIncidentHalfEdges)
             {
-                int count = kvp.Value;
-                if (count == 1) result.openEdgeCount++;
-                else if (count > 2) result.nonManifoldEdgeCount++;
+                var halfEdges = kvp.Value;
+                int faceCount = halfEdges.Count;
+
+                if (faceCount == 1)
+                {
+                    result.openEdgeCount++;
+                    if (result.openEdgeCount <= 6)
+                    {
+                        var e = halfEdges[0];
+                        Debug.LogWarning($"[OPEN_EDGE] between {distinctGeomPositions[kvp.Key.Item1]:F4} and {distinctGeomPositions[kvp.Key.Item2]:F4}, incident tri {e.triIdx}: {distinctGeomPositions[remappedGeom[tris[e.triIdx]]]:F4} -> {distinctGeomPositions[remappedGeom[tris[e.triIdx+1]]]:F4} -> {distinctGeomPositions[remappedGeom[tris[e.triIdx+2]]]:F4}");
+                    }
+                }
+                else if (faceCount > 2)
+                {
+                    result.nonManifoldEdgeCount++;
+                    if (result.nonManifoldEdgeCount <= 3)
+                    {
+                        var sb = new System.Text.StringBuilder();
+                        sb.AppendLine($"[CSG_DEBUG] Non-manifold edge between {distinctGeomPositions[kvp.Key.Item1]:F4} and {distinctGeomPositions[kvp.Key.Item2]:F4}, faceCount={faceCount}:");
+                        for (int h = 0; h < halfEdges.Count; h++)
+                        {
+                            int triIdx = halfEdges[h].triIdx;
+                            int ta = remappedGeom[tris[triIdx]];
+                            int tb = remappedGeom[tris[triIdx + 1]];
+                            int tc = remappedGeom[tris[triIdx + 2]];
+                            sb.AppendLine($"  Tri {h}: ({distinctGeomPositions[ta]:F4}) -> ({distinctGeomPositions[tb]:F4}) -> ({distinctGeomPositions[tc]:F4})");
+                        }
+                        Debug.LogWarning(sb.ToString());
+                    }
+                }
+                else if (faceCount == 2)
+                {
+                    // For a manifold closed solid, the two incident faces must traverse the edge in opposite directions
+                    var e1 = halfEdges[0];
+                    var e2 = halfEdges[1];
+                    if (e1.from == e2.from && e1.to == e2.to)
+                    {
+                        // Both traverse in the same direction -> inconsistent winding / normal inversion!
+                        result.inconsistentWindingCount++;
+                    }
+                }
             }
 
-            // An ideal closed manifold solid has 0 open edges and 0 non-manifold edges.
-            // In complex CSG cuts, small boundary tolerance can occur, but gross defects must be flagged.
-            bool geometryHealthy = result.triangleCount >= 4 && result.degenerateTriangleCount < (result.triangleCount / 2);
-            result.isValid = geometryHealthy;
-            result.message = result.isValid ? "Mesh valid" : $"Validation failed: {result.openEdgeCount} open edges, {result.nonManifoldEdgeCount} non-manifold edges";
+            // 5. T-Junction Analysis
+            foreach (var kvp in edgeIncidentHalfEdges)
+            {
+                int edgeV0 = kvp.Key.Item1;
+                int edgeV1 = kvp.Key.Item2;
+                Vector3 pA = distinctGeomPositions[edgeV0];
+                Vector3 pB = distinctGeomPositions[edgeV1];
+                Vector3 ab = pB - pA;
+                float abLenSqr = ab.sqrMagnitude;
+                if (abLenSqr < 1e-8f) continue;
+
+                for (int v = 0; v < distinctGeomPositions.Count; v++)
+                {
+                    if (v == edgeV0 || v == edgeV1) continue;
+
+                    Vector3 pV = distinctGeomPositions[v];
+                    float tParam = Vector3.Dot(pV - pA, ab) / abLenSqr;
+                    if (tParam > 0.02f && tParam < 0.98f) // Strictly interior
+                    {
+                        Vector3 proj = pA + tParam * ab;
+                        if ((pV - proj).sqrMagnitude <= geomTolSqr)
+                        {
+                            result.tJunctionCount++;
+                        }
+                    }
+                }
+            }
+
+            // 6. Connected Components Count (via face adjacency)
+            result.connectedComponentCount = CountConnectedComponents(tris, remappedGeom);
+
+            // 7. Strict Acceptance Criteria
+            bool openEdgesAcceptable = allowOpenBoundaries || result.openEdgeCount == 0;
+            bool isCleanSolid = !result.hasNonFiniteCoordinates &&
+                               openEdgesAcceptable &&
+                               result.nonManifoldEdgeCount == 0 &&
+                               result.degenerateTriangleCount == 0 &&
+                               result.duplicateTriangleCount == 0 &&
+                               result.inconsistentWindingCount == 0 &&
+                               result.triangleCount >= 4;
+
+            result.isValid = isCleanSolid;
+
+            if (result.isValid)
+            {
+                result.message = $"Mesh valid closed solid ({result.triangleCount} tris, {result.connectedComponentCount} component(s))";
+            }
+            else
+            {
+                var defects = new List<string>();
+                if (result.hasNonFiniteCoordinates) defects.Add("non-finite coordinates");
+                if (result.openEdgeCount > 0) defects.Add($"{result.openEdgeCount} boundary/open edges");
+                if (result.nonManifoldEdgeCount > 0) defects.Add($"{result.nonManifoldEdgeCount} non-manifold edges");
+                if (result.degenerateTriangleCount > 0) defects.Add($"{result.degenerateTriangleCount} degenerate triangles");
+                if (result.duplicateTriangleCount > 0) defects.Add($"{result.duplicateTriangleCount} duplicate triangles");
+                if (result.inconsistentWindingCount > 0) defects.Add($"{result.inconsistentWindingCount} inconsistent winding edges");
+                if (result.tJunctionCount > 0) defects.Add($"{result.tJunctionCount} T-junctions");
+                result.message = "Boolean validation failed: " + string.Join(", ", defects);
+            }
 
             return result;
         }
 
-        private static void AddEdge(Dictionary<(int, int), int> edgeUsage, int a, int b)
+        private static void AddDirectedEdge(Dictionary<(int, int), List<(int from, int to, int triIdx)>> edgeDict, int from, int to, int triIdx)
         {
-            var key = a < b ? (a, b) : (b, a);
-            if (edgeUsage.TryGetValue(key, out int count))
+            var undirectedKey = from < to ? (from, to) : (to, from);
+            if (!edgeDict.TryGetValue(undirectedKey, out var list))
             {
-                edgeUsage[key] = count + 1;
+                list = new List<(int from, int to, int triIdx)>(2);
+                edgeDict[undirectedKey] = list;
             }
-            else
-            {
-                edgeUsage[key] = 1;
-            }
+            list.Add((from, to, triIdx));
         }
+
+        private static int CountConnectedComponents(int[] tris, int[] remappedGeom)
+        {
+            int triCount = tris.Length / 3;
+            if (triCount == 0) return 0;
+
+            // Map each geometric vertex to incident triangles
+            var vertToTris = new Dictionary<int, List<int>>();
+            for (int t = 0; t < triCount; t++)
+            {
+                for (int c = 0; c < 3; c++)
+                {
+                    int g = remappedGeom[tris[t * 3 + c]];
+                    if (!vertToTris.TryGetValue(g, out var list))
+                    {
+                        list = new List<int>();
+                        vertToTris[g] = list;
+                    }
+                    list.Add(t);
+                }
+            }
+
+            var visitedTris = new bool[triCount];
+            int components = 0;
+
+            for (int t = 0; t < triCount; t++)
+            {
+                if (visitedTris[t]) continue;
+
+                components++;
+                var queue = new Queue<int>();
+                queue.Enqueue(t);
+                visitedTris[t] = true;
+
+                while (queue.Count > 0)
+                {
+                    int curTri = queue.Dequeue();
+                    for (int c = 0; c < 3; c++)
+                    {
+                        int g = remappedGeom[tris[curTri * 3 + c]];
+                        if (vertToTris.TryGetValue(g, out var neighbors))
+                        {
+                            for (int n = 0; n < neighbors.Count; n++)
+                            {
+                                int nbr = neighbors[n];
+                                if (!visitedTris[nbr])
+                                {
+                                    visitedTris[nbr] = true;
+                                    queue.Enqueue(nbr);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            return components;
+        }
+
+        #endregion
     }
 }

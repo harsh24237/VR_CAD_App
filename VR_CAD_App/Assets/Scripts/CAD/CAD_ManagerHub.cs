@@ -203,7 +203,7 @@ namespace VRCAD.Core
             return success;
         }
 
-        public bool CutHoleInSelection(float radius = 0.03f, float depth = 0.25f)
+        public bool CutHoleInSelection(float radius = 0.03f, float depth = 0.25f, HoleType holeType = HoleType.Through)
         {
             CADObject selected = selectionManager.SelectedObject;
             if (selected == null)
@@ -212,12 +212,41 @@ namespace VRCAD.Core
                 return false;
             }
 
-            Vector3 center = selected.transform.position;
-            Vector3 axis = selected.transform.up;
+            Vector3 faceCenter;
+            Vector3 faceNormal;
+            Vector3 surfacePoint;
 
-            bool success = booleanManager.CutHole(selected, center, axis, radius, depth);
-            EmitStatus(success ? $"Cut hole (r={radius * 1000:F0}mm)" : "Hole cut failed");
-            return success;
+            if (!selectionManager.GetSelectedFaceGeometry(out faceCenter, out faceNormal, out surfacePoint))
+            {
+                surfacePoint = selected.transform.position;
+                faceNormal = selected.transform.up;
+            }
+
+            var options = new HoleOptions
+            {
+                holeType = holeType,
+                radius = radius,
+                depth = depth,
+                radialSegments = 24,
+                overcutMargin = VRCAD.Core.CSG.CSGTolerance.ThroughHoleOvercutMargin
+            };
+
+            Mesh beforeMesh = UnityEngine.Object.Instantiate(selected.MeshFilter.sharedMesh);
+            BooleanResult result = booleanManager.CutHoleAdvanced(selected, surfacePoint, faceNormal, options);
+
+            if (result.status == BooleanResultStatus.Success)
+            {
+                selected.SetMesh(result.resultMesh);
+                OnMeshModified(selected);
+                undoRedoManager?.RecordCommand(new MeshSnapshotCommand(selected, beforeMesh, selected.MeshFilter.sharedMesh, $"Cut Hole on {selected.name}"));
+                EmitStatus(result.message);
+                return true;
+            }
+            else
+            {
+                EmitStatus($"Hole cut failed: {result.message}");
+                return false;
+            }
         }
 
         public bool ApplyBevelToSelection(float amount = 0.03f)
@@ -384,18 +413,38 @@ namespace VRCAD.Core
         private bool ExecuteSubtract(CADObject target, CADObject cutter)
         {
             Mesh targetBefore = UnityEngine.Object.Instantiate(target.MeshFilter.sharedMesh);
-            bool success = booleanManager.PerformBoolean(target, cutter, BooleanOperation.Subtract);
+            BooleanResult res = booleanManager.ExecuteBoolean(target, cutter, BooleanOperation.Subtract);
             markedCombineOperand = null;
-            if (success)
+
+            switch (res.status)
             {
-                undoRedoManager?.RecordCommand(new BooleanCommand(target, cutter, targetBefore, target.MeshFilter.sharedMesh, $"Subtract from {target.name}"));
-                EmitStatus($"Subtract completed: cut {target.name} using {cutter.name}");
+                case BooleanResultStatus.Success:
+                    target.SetMesh(res.resultMesh);
+                    OnMeshModified(target);
+                    cutter.gameObject.SetActive(false);
+                    shapeManager.UnregisterObject(cutter);
+                    undoRedoManager?.RecordCommand(new BooleanCommand(target, cutter, targetBefore, res.resultMesh, $"Subtract from {target.name}"));
+                    EmitStatus($"Subtract completed: cut {target.name} using {cutter.name}");
+                    return true;
+
+                case BooleanResultStatus.Empty:
+                    target.gameObject.SetActive(false);
+                    shapeManager.UnregisterObject(target);
+                    cutter.gameObject.SetActive(false);
+                    shapeManager.UnregisterObject(cutter);
+                    undoRedoManager?.RecordCommand(new BooleanCommand(target, cutter, targetBefore, null, $"Subtract (empty) {target.name}", targetBecameEmpty: true));
+                    EmitStatus($"Subtract completed: target {target.name} completely removed");
+                    return true;
+
+                case BooleanResultStatus.Unchanged:
+                    EmitStatus(res.message);
+                    return false;
+
+                case BooleanResultStatus.Failure:
+                default:
+                    EmitStatus($"Subtract failed: {res.message}");
+                    return false;
             }
-            else
-            {
-                EmitStatus("Subtract operation failed");
-            }
-            return success;
         }
 
         public bool PerformUnion()
@@ -443,18 +492,98 @@ namespace VRCAD.Core
         private bool ExecuteUnion(CADObject target, CADObject tool)
         {
             Mesh targetBefore = UnityEngine.Object.Instantiate(target.MeshFilter.sharedMesh);
-            bool success = booleanManager.PerformBoolean(target, tool, BooleanOperation.Union);
+            BooleanResult res = booleanManager.ExecuteBoolean(target, tool, BooleanOperation.Union);
             markedUnionOperand = null;
-            if (success)
+
+            if (res.status == BooleanResultStatus.Success)
             {
-                undoRedoManager?.RecordCommand(new BooleanCommand(target, tool, targetBefore, target.MeshFilter.sharedMesh, $"Union {target.name} + {tool.name}"));
+                target.SetMesh(res.resultMesh);
+                OnMeshModified(target);
+                tool.gameObject.SetActive(false);
+                shapeManager.UnregisterObject(tool);
+                undoRedoManager?.RecordCommand(new BooleanCommand(target, tool, targetBefore, res.resultMesh, $"Union {target.name} + {tool.name}"));
                 EmitStatus($"Union completed: merged {target.name} and {tool.name}");
+                return true;
             }
             else
             {
-                EmitStatus("Union operation failed");
+                EmitStatus($"Union failed: {res.message}");
+                return false;
             }
-            return success;
+        }
+
+        private CADObject markedIntersectOperand = null;
+
+        public bool PerformIntersect()
+        {
+            CADObject target = selectionManager.SelectedObject;
+            var allObjects = shapeManager.RegisteredObjects;
+
+            if (target == null && allObjects.Count > 0)
+            {
+                target = allObjects[allObjects.Count - 1];
+                selectionManager.Select(target, new RaycastHit());
+            }
+
+            if (target == null)
+            {
+                EmitStatus("Create or select an object first for Intersect");
+                return false;
+            }
+
+            if (markedIntersectOperand != null && markedIntersectOperand != target)
+            {
+                return ExecuteIntersect(target, markedIntersectOperand);
+            }
+
+            if (allObjects.Count == 2)
+            {
+                CADObject other = (allObjects[0] == target) ? allObjects[1] : allObjects[0];
+                return ExecuteIntersect(target, other);
+            }
+
+            if (allObjects.Count < 2)
+            {
+                EmitStatus("Intersect requires 2 shapes. Click '+Add' to spawn another shape!");
+                return false;
+            }
+
+            markedIntersectOperand = target;
+            EmitStatus($"Step 1/2: Marked {target.name} for Intersect. Now select the other shape and click Intersect!");
+            return true;
+        }
+
+        private bool ExecuteIntersect(CADObject target, CADObject tool)
+        {
+            Mesh targetBefore = UnityEngine.Object.Instantiate(target.MeshFilter.sharedMesh);
+            BooleanResult res = booleanManager.ExecuteBoolean(target, tool, BooleanOperation.Intersect);
+            markedIntersectOperand = null;
+
+            switch (res.status)
+            {
+                case BooleanResultStatus.Success:
+                    target.SetMesh(res.resultMesh);
+                    OnMeshModified(target);
+                    tool.gameObject.SetActive(false);
+                    shapeManager.UnregisterObject(tool);
+                    undoRedoManager?.RecordCommand(new BooleanCommand(target, tool, targetBefore, res.resultMesh, $"Intersect {target.name} and {tool.name}"));
+                    EmitStatus($"Intersect completed ({res.validation.triangleCount} triangles)");
+                    return true;
+
+                case BooleanResultStatus.Empty:
+                    target.gameObject.SetActive(false);
+                    shapeManager.UnregisterObject(target);
+                    tool.gameObject.SetActive(false);
+                    shapeManager.UnregisterObject(tool);
+                    undoRedoManager?.RecordCommand(new BooleanCommand(target, tool, targetBefore, null, $"Intersect (empty) {target.name}", targetBecameEmpty: true));
+                    EmitStatus("Intersection resulted in empty geometry.");
+                    return true;
+
+                case BooleanResultStatus.Failure:
+                default:
+                    EmitStatus($"Intersect failed: {res.message}");
+                    return false;
+            }
         }
 
         public void SetSelectedColor(Color color)

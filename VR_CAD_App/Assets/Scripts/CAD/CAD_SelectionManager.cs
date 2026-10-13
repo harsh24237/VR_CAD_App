@@ -23,6 +23,7 @@ namespace VRCAD.Core
         private int selectedFaceTriangleIndex = -1;
         private int selectedVertexIndex = -1;
         private (int v1, int v2) selectedEdge = (-1, -1);
+        private RaycastHit? lastHit = null;
 
         [Header("Visual Selection Helpers")]
         private GameObject selectionVisualizer;
@@ -44,6 +45,7 @@ namespace VRCAD.Core
         public int SelectedFaceTriangleIndex => selectedFaceTriangleIndex;
         public int SelectedVertexIndex => selectedVertexIndex;
         public (int v1, int v2) SelectedEdge => selectedEdge;
+        public RaycastHit? LastHit => lastHit;
 
         private void Awake()
         {
@@ -144,6 +146,7 @@ namespace VRCAD.Core
             }
 
             selectedObject = cadObj;
+            lastHit = hit;
             selectedObject.SetSelected(true);
 
             Mesh mesh = cadObj.MeshFilter.sharedMesh;
@@ -284,8 +287,57 @@ namespace VRCAD.Core
             selectedFaceTriangleIndex = -1;
             selectedVertexIndex = -1;
             selectedEdge = (-1, -1);
+            lastHit = null;
             HideVisualHelpers();
             CADManagerHub.Instance?.OnSelectionUpdated(null);
+        }
+
+        /// <summary>
+        /// Retrieves the geometric center, outward normal, and entry surface point of the currently selected face in world coordinates.
+        /// </summary>
+        public bool GetSelectedFaceGeometry(out Vector3 faceCenterWorld, out Vector3 faceNormalWorld, out Vector3 surfacePointWorld)
+        {
+            faceCenterWorld = Vector3.zero;
+            faceNormalWorld = Vector3.up;
+            surfacePointWorld = Vector3.zero;
+
+            if (selectedObject == null || selectedObject.MeshFilter.sharedMesh == null)
+                return false;
+
+            Mesh mesh = selectedObject.MeshFilter.sharedMesh;
+            Transform trans = selectedObject.transform;
+            int[] tris = mesh.triangles;
+            Vector3[] verts = mesh.vertices;
+
+            int triIdx = selectedFaceTriangleIndex;
+            if (triIdx >= 0 && triIdx * 3 + 2 < tris.Length)
+            {
+                Vector3 w0 = trans.TransformPoint(verts[tris[triIdx * 3 + 0]]);
+                Vector3 w1 = trans.TransformPoint(verts[tris[triIdx * 3 + 1]]);
+                Vector3 w2 = trans.TransformPoint(verts[tris[triIdx * 3 + 2]]);
+
+                faceCenterWorld = (w0 + w1 + w2) / 3f;
+                Vector3 cross = Vector3.Cross(w1 - w0, w2 - w0);
+                faceNormalWorld = cross.sqrMagnitude > 1e-8f ? cross.normalized : trans.up;
+
+                if (lastHit.HasValue && lastHit.Value.collider != null && lastHit.Value.triangleIndex == triIdx)
+                {
+                    surfacePointWorld = lastHit.Value.point;
+                }
+                else
+                {
+                    surfacePointWorld = faceCenterWorld;
+                }
+                return true;
+            }
+
+            // Fallback for object mode: top face center and object up direction
+            Bounds b = mesh.bounds;
+            Vector3 topLocal = b.center + Vector3.up * b.extents.y;
+            surfacePointWorld = trans.TransformPoint(topLocal);
+            faceCenterWorld = surfacePointWorld;
+            faceNormalWorld = trans.up;
+            return true;
         }
 
         private float DistancePointToSegment(Vector3 p, Vector3 a, Vector3 b)
