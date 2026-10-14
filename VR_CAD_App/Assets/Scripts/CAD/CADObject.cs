@@ -772,7 +772,30 @@ namespace VRCAD.Core
             if (UnityEngine.EventSystems.EventSystem.current != null && UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject())
                 return; // Don't grab object if clicking UI
 
-            _mouseZCoord = Camera.main.WorldToScreenPoint(gameObject.transform.position).z;
+            Camera cam = Camera.main;
+            if (cam == null) return;
+
+            Ray ray = cam.ScreenPointToRay(Input.mousePosition);
+            if (Physics.Raycast(ray, out RaycastHit hit, 100f))
+            {
+                CADObject hitCad = hit.collider.GetComponentInParent<CADObject>();
+                if (hitCad == this)
+                {
+                    _mouseZCoord = cam.WorldToScreenPoint(gameObject.transform.position).z;
+                    _mouseOffset = gameObject.transform.position - GetMouseWorldPos();
+
+                    // Update selection with the accurate RaycastHit!
+                    CADManagerHub.Instance?.SelectionManager?.Select(this, hit);
+
+                    if (CADManagerHub.Instance?.SelectionManager?.ActiveMode == SelectionMode.Object)
+                    {
+                        CADManagerHub.Instance?.TransformManager?.StartObjectManipulation(this);
+                    }
+                    return;
+                }
+            }
+
+            _mouseZCoord = cam.WorldToScreenPoint(gameObject.transform.position).z;
             _mouseOffset = gameObject.transform.position - GetMouseWorldPos();
             CADManagerHub.Instance?.OnObjectGrabbed(this, null);
         }

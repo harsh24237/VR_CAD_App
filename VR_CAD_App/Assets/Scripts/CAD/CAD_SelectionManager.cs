@@ -27,6 +27,7 @@ namespace VRCAD.Core
 
         [Header("Visual Selection Helpers")]
         private GameObject selectionVisualizer;
+        private LineRenderer faceHighlightRenderer;
         private LineRenderer edgeHighlightRenderer;
         private GameObject vertexHighlightSphere;
 
@@ -60,6 +61,22 @@ namespace VRCAD.Core
             }
         }
 
+        private void Update()
+        {
+            // Desktop mouse selection fallback when clicking in the scene
+            if (Input.GetMouseButtonDown(0))
+            {
+                if (UnityEngine.EventSystems.EventSystem.current != null && UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject())
+                    return;
+
+                Camera cam = Camera.main;
+                if (cam == null) return;
+
+                Ray ray = cam.ScreenPointToRay(Input.mousePosition);
+                RaycastSelect(ray);
+            }
+        }
+
         private void OnDestroy()
         {
             if (CADManagerHub.Instance != null)
@@ -80,6 +97,21 @@ namespace VRCAD.Core
         {
             selectionVisualizer = new GameObject("CAD_SelectionVisualizer");
             selectionVisualizer.transform.SetParent(transform);
+
+            // Face highlight LineRenderer
+            GameObject faceObj = new GameObject("FaceHighlight");
+            faceObj.transform.SetParent(selectionVisualizer.transform);
+            faceHighlightRenderer = faceObj.AddComponent<LineRenderer>();
+            faceHighlightRenderer.startWidth = 0.005f;
+            faceHighlightRenderer.endWidth = 0.005f;
+            faceHighlightRenderer.useWorldSpace = true;
+            faceHighlightRenderer.positionCount = 4;
+            Material faceMat = new Material(Shader.Find("Unlit/Color") ?? Shader.Find("Standard"))
+            {
+                color = new Color(0.0f, 0.85f, 1.0f, 1.0f)
+            };
+            faceHighlightRenderer.material = faceMat;
+            faceHighlightRenderer.enabled = false;
 
             // Edge highlight LineRenderer
             GameObject edgeObj = new GameObject("EdgeHighlight");
@@ -180,7 +212,35 @@ namespace VRCAD.Core
             if (cadObj == null || triangleIndex < 0) return;
             selectedFaceTriangleIndex = triangleIndex;
             cadObj.SetSelectedFace(triangleIndex);
-            HideVisualHelpers();
+            ShowFaceHighlight(cadObj, triangleIndex);
+            if (edgeHighlightRenderer != null) edgeHighlightRenderer.enabled = false;
+            if (vertexHighlightSphere != null) vertexHighlightSphere.SetActive(false);
+        }
+
+        private void ShowFaceHighlight(CADObject cadObj, int triangleIndex)
+        {
+            if (faceHighlightRenderer == null || cadObj == null || cadObj.MeshFilter.sharedMesh == null) return;
+
+            Mesh mesh = cadObj.MeshFilter.sharedMesh;
+            int[] tris = mesh.triangles;
+            Vector3[] verts = mesh.vertices;
+
+            if (triangleIndex * 3 + 2 >= tris.Length) return;
+
+            Transform trans = cadObj.transform;
+            Vector3 w0 = trans.TransformPoint(verts[tris[triangleIndex * 3 + 0]]);
+            Vector3 w1 = trans.TransformPoint(verts[tris[triangleIndex * 3 + 1]]);
+            Vector3 w2 = trans.TransformPoint(verts[tris[triangleIndex * 3 + 2]]);
+
+            Vector3 normal = Vector3.Cross(w1 - w0, w2 - w0).normalized;
+            Vector3 offset = normal * 0.002f;
+
+            faceHighlightRenderer.positionCount = 4;
+            faceHighlightRenderer.SetPosition(0, w0 + offset);
+            faceHighlightRenderer.SetPosition(1, w1 + offset);
+            faceHighlightRenderer.SetPosition(2, w2 + offset);
+            faceHighlightRenderer.SetPosition(3, w0 + offset);
+            faceHighlightRenderer.enabled = true;
         }
 
         public void SelectClosestVertexAt(CADObject cadObj, Vector3 hitWorldPoint)
@@ -271,6 +331,7 @@ namespace VRCAD.Core
 
         private void HideVisualHelpers()
         {
+            if (faceHighlightRenderer != null) faceHighlightRenderer.enabled = false;
             if (edgeHighlightRenderer != null) edgeHighlightRenderer.enabled = false;
             if (vertexHighlightSphere != null) vertexHighlightSphere.SetActive(false);
         }

@@ -212,14 +212,32 @@ namespace VRCAD.Core
                 return false;
             }
 
+            if (selectionManager.SelectedFaceTriangleIndex < 0)
+            {
+                EmitStatus("Hole cutting requires a selected face. Switch to Face selection mode and click a face.");
+                return false;
+            }
+
+            if (radius <= 0.001f || float.IsNaN(radius) || float.IsInfinity(radius))
+            {
+                EmitStatus($"Invalid hole radius: {radius * 1000f:F1}mm (must be > 1mm)");
+                return false;
+            }
+
+            if (depth <= 0.001f || float.IsNaN(depth) || float.IsInfinity(depth))
+            {
+                EmitStatus($"Invalid hole depth: {depth * 1000f:F1}mm (must be > 1mm)");
+                return false;
+            }
+
             Vector3 faceCenter;
             Vector3 faceNormal;
             Vector3 surfacePoint;
 
             if (!selectionManager.GetSelectedFaceGeometry(out faceCenter, out faceNormal, out surfacePoint))
             {
-                surfacePoint = selected.transform.position;
-                faceNormal = selected.transform.up;
+                EmitStatus("Could not determine selected face geometry.");
+                return false;
             }
 
             var options = new HoleOptions
@@ -336,9 +354,11 @@ namespace VRCAD.Core
         [Header("CSG Operand Tracking")]
         private CADObject markedCombineOperand;
         private CADObject markedUnionOperand;
+        private CADObject markedIntersectOperand;
 
         public CADObject MarkedCombineOperand => markedCombineOperand;
         public CADObject MarkedUnionOperand => markedUnionOperand;
+        public CADObject MarkedIntersectOperand => markedIntersectOperand;
 
         public void MarkForCombine()
         {
@@ -365,6 +385,20 @@ namespace VRCAD.Core
             else
             {
                 EmitStatus("Select an object first to mark for union");
+            }
+        }
+
+        public void MarkForIntersect()
+        {
+            CADObject selected = selectionManager.SelectedObject;
+            if (selected != null)
+            {
+                markedIntersectOperand = selected;
+                EmitStatus($"Marked {selected.name} for Intersect. Now select target object and click Intersect!");
+            }
+            else
+            {
+                EmitStatus("Select an object first to mark for intersect");
             }
         }
 
@@ -511,8 +545,6 @@ namespace VRCAD.Core
                 return false;
             }
         }
-
-        private CADObject markedIntersectOperand = null;
 
         public bool PerformIntersect()
         {
@@ -828,7 +860,20 @@ namespace VRCAD.Core
             if (obj == null) return;
             string interactorName = args?.interactorObject?.transform != null ? args.interactorObject.transform.name : "Mouse/Desktop";
             Debug.Log($"[QuestBaseline Interaction] Grab: {obj.name}; interactor={interactorName}");
-            selectionManager?.Select(obj, new RaycastHit());
+            RaycastHit hit = new RaycastHit();
+            if (args != null && args.interactorObject is XRRayInteractor rayInter && rayInter.TryGetCurrent3DRaycastHit(out RaycastHit rHit))
+            {
+                hit = rHit;
+            }
+            else if (Camera.main != null)
+            {
+                Ray screenRay = Camera.main.ScreenPointToRay(Input.mousePosition);
+                if (Physics.Raycast(screenRay, out RaycastHit mouseHit, 100f))
+                {
+                    hit = mouseHit;
+                }
+            }
+            selectionManager?.Select(obj, hit);
             transformManager?.StartObjectManipulation(obj);
         }
 

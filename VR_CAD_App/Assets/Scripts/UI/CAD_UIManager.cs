@@ -38,6 +38,15 @@ namespace VRCAD.UI
         private float opacityVal = 1.0f;
         private bool isWireframeActive = false;
 
+        // Hole parameters state
+        private float holeRadius = 0.030f; // 30mm default
+        private float holeDepth = 0.080f;  // 80mm default
+        private HoleType activeHoleType = HoleType.Through;
+        private TextMeshProUGUI holeRadiusText;
+        private TextMeshProUGUI holeDepthText;
+        private Button holeTypeThroughBtn;
+        private Button holeTypeBlindBtn;
+
         // Sliders
         private Slider roughnessSlider;
         private Slider metallicSlider;
@@ -58,6 +67,9 @@ namespace VRCAD.UI
         // Status bar & Selection
         private TextMeshProUGUI statusText;
         private TextMeshProUGUI selectionModeText;
+        private TextMeshProUGUI selectionTargetText;
+        private TextMeshProUGUI selectionDetailsText;
+        private TextMeshProUGUI selectionModeTagText;
 
         // Snap state
         private float activeGridSnap = 0.005f;
@@ -87,27 +99,30 @@ namespace VRCAD.UI
         private int numpadTargetAxis = 0;    // 0: X, 1: Y, 2: Z
 
         // ──────────────────────────────────────────────────
-        //  COLOR PALETTE — Sleek dark navy glassmorphism
+        //  COLOR PALETTE — Sleek high-contrast dark navy CAD theme
         // ──────────────────────────────────────────────────
-        private readonly Color colCardBg         = new Color(0.05f, 0.07f, 0.12f, 0.95f);
-        private readonly Color colInsetField     = new Color(0.03f, 0.04f, 0.08f, 1.0f);
-        private readonly Color colBtnNormal      = new Color(0.08f, 0.11f, 0.18f, 1.0f);
-        private readonly Color colBtnHover       = new Color(0.14f, 0.20f, 0.32f, 1.0f);
-        private readonly Color colBtnBorder      = new Color(0.12f, 0.18f, 0.28f, 1.0f);
-        private readonly Color colCyanActive     = new Color(0.00f, 0.70f, 0.98f, 1.0f);
-        private readonly Color colCyanGlow       = new Color(0.00f, 0.85f, 1.00f, 1.0f);
-        private readonly Color colSilverGlow     = new Color(0.85f, 0.88f, 0.94f, 1.0f);
-        private readonly Color colTextLight      = new Color(0.92f, 0.95f, 0.98f, 1.0f);
-        private readonly Color colTextMuted      = new Color(0.50f, 0.58f, 0.68f, 1.0f);
-        private readonly Color colTopBar         = new Color(0.04f, 0.06f, 0.10f, 0.97f);
-        private readonly Color colAxisRed        = new Color(0.90f, 0.20f, 0.20f, 1.0f);
-        private readonly Color colAxisGreen      = new Color(0.18f, 0.78f, 0.28f, 1.0f);
-        private readonly Color colAxisBlue       = new Color(0.20f, 0.45f, 0.95f, 1.0f);
-        private readonly Color colGreenExport    = new Color(0.12f, 0.58f, 0.25f, 1.0f);
-        private readonly Color colRedClear       = new Color(0.85f, 0.18f, 0.18f, 1.0f);
-        private readonly Color colBlueAction     = new Color(0.14f, 0.45f, 0.88f, 1.0f);
-        private readonly Color colDockBg         = new Color(0.04f, 0.06f, 0.10f, 0.97f);
-        private readonly Color colCardBorderGlow = new Color(0.00f, 0.50f, 0.80f, 0.25f);
+        private readonly Color colCardBg            = new Color(0.05f, 0.07f, 0.12f, 0.96f);
+        private readonly Color colInsetField        = new Color(0.03f, 0.04f, 0.08f, 1.0f);
+        private readonly Color colBtnNormal         = new Color(0.08f, 0.12f, 0.19f, 1.0f);
+        private readonly Color colBtnHover          = new Color(0.16f, 0.24f, 0.38f, 1.0f);
+        private readonly Color colBtnBorder         = new Color(0.20f, 0.30f, 0.45f, 0.85f);
+        private readonly Color colCyanActive        = new Color(0.00f, 0.70f, 0.98f, 1.0f);
+        private readonly Color colCyanGlow          = new Color(0.00f, 0.85f, 1.00f, 1.0f);
+        private readonly Color colSilverGlow        = new Color(0.85f, 0.88f, 0.94f, 1.0f);
+        private readonly Color colTextLight         = new Color(0.95f, 0.97f, 1.00f, 1.0f);
+        private readonly Color colTextSecondary     = new Color(0.74f, 0.82f, 0.92f, 1.0f);
+        private readonly Color colTextMuted         = new Color(0.56f, 0.64f, 0.75f, 1.0f);
+        private readonly Color colHeaderLight       = new Color(0.85f, 0.92f, 0.98f, 1.0f);
+        private readonly Color colTopBar            = new Color(0.04f, 0.06f, 0.10f, 0.97f);
+        private readonly Color colAxisRed           = new Color(0.92f, 0.22f, 0.22f, 1.0f);
+        private readonly Color colAxisGreen         = new Color(0.18f, 0.80f, 0.30f, 1.0f);
+        private readonly Color colAxisBlue          = new Color(0.20f, 0.50f, 0.98f, 1.0f);
+        private readonly Color colGreenExport       = new Color(0.12f, 0.60f, 0.26f, 1.0f);
+        private readonly Color colRedClear          = new Color(0.88f, 0.20f, 0.20f, 1.0f);
+        private readonly Color colBlueAction        = new Color(0.12f, 0.48f, 0.92f, 1.0f);
+        private readonly Color colDockBg            = new Color(0.04f, 0.06f, 0.10f, 0.97f);
+        private readonly Color colCardBorderGlow    = new Color(0.18f, 0.28f, 0.44f, 0.75f);
+        private readonly Color colCardTopHighlight  = new Color(0.00f, 0.75f, 1.00f, 0.65f);
 
         // Layout constants — Carefully tuned with NO overlaps
         private const float TOP_BAR_W = 1460f;
@@ -138,6 +153,8 @@ namespace VRCAD.UI
                     btn.gameObject.AddComponent<UIHapticTrigger>();
                 }
             }
+
+            SpawnInitialDemoShape();
         }
 
         private void SpawnInitialDemoShape()
@@ -155,17 +172,18 @@ namespace VRCAD.UI
                     ? CAD_EnvironmentManager.Instance.GridSurfaceY
                     : 0.78f;
 
-                Vector3 spawnPos = new Vector3(gridCenter.x, gridY + 0.14f, gridCenter.z);
+                Vector3 spawnPos = new Vector3(gridCenter.x, gridY + 0.12f, gridCenter.z);
                 CADObject obj = sm.SpawnPrimitive(
                     CADShapeType.Box,
                     spawnPos,
                     Quaternion.Euler(0, 15f, 0),
-                    new Vector3(0.1822f, 0.22f, 0.3719f)
+                    new Vector3(0.20f, 0.20f, 0.20f)
                 );
                 if (obj != null)
                 {
                     obj.SetColor(currentColor);
                     obj.SetMaterialProperties(roughnessVal, metallicVal);
+                    CADManagerHub.Instance?.SelectionManager?.Select(obj, new RaycastHit());
                 }
             }
         }
@@ -349,34 +367,45 @@ namespace VRCAD.UI
             GameObject bar = CreateUIPanel("TopBar", parent, new Vector2(0, TOP_BAR_Y), new Vector2(TOP_BAR_W, TOP_BAR_H), colTopBar);
 
             // Glowing bottom border
-            CreateUIPanel("TopBarGlow", bar.transform, new Vector2(0, -TOP_BAR_H * 0.5f + 1), new Vector2(TOP_BAR_W, 2), colCardBorderGlow);
+            CreateUIPanel("TopBarGlow", bar.transform, new Vector2(0, -TOP_BAR_H * 0.5f + 1), new Vector2(TOP_BAR_W, 2), colCardTopHighlight);
 
-            // Brand / Logo matching reference screenshot: [x] VR CAD 3D WORKSPACE
-            GameObject checkIcon = CreateUIPanel("LogoCheck", bar.transform, new Vector2(-TOP_BAR_W * 0.5f + 25, 0), new Vector2(22, 22), colBtnNormal);
-            CreateTMPText("CheckMark", checkIcon.transform, "<b>[x]</b>", 10, TextAlignmentOptions.Center, colCyanActive, Vector2.zero, new Vector2(22, 22));
+            // Brand / Logo matching reference screenshot: [3D] VR CAD 3D WORKSPACE
+            GameObject checkIcon = CreateUIPanel("LogoCheck", bar.transform, new Vector2(-TOP_BAR_W * 0.5f + 25, 0), new Vector2(24, 24), colBtnNormal);
+            var ciBdr = checkIcon.AddComponent<Outline>();
+            ciBdr.effectColor = colCyanActive * 0.6f;
+            ciBdr.effectDistance = new Vector2(1, -1);
+            CreateTMPText("CheckMark", checkIcon.transform, "<b>3D</b>", 9.5f, TextAlignmentOptions.Center, colCyanGlow, Vector2.zero, new Vector2(24, 24));
 
             CreateTMPText("LogoText", bar.transform, "<b>VR CAD</b>", 16, TextAlignmentOptions.Left, colTextLight, new Vector2(-TOP_BAR_W * 0.5f + 85, 5), new Vector2(90, 20));
-            CreateTMPText("LogoSub", bar.transform, "<size=8><b>3D WORKSPACE</b></size>", 8, TextAlignmentOptions.Left, colTextMuted, new Vector2(-TOP_BAR_W * 0.5f + 85, -9), new Vector2(90, 14));
+            CreateTMPText("LogoSub", bar.transform, "<size=8><b>3D WORKSPACE</b></size>", 8, TextAlignmentOptions.Left, colTextSecondary, new Vector2(-TOP_BAR_W * 0.5f + 85, -9), new Vector2(90, 14));
 
             // Selection Mode Indicator Pill
-            float pillX = -60f;
-            GameObject pill = CreateUIPanel("SelectionPill", bar.transform, new Vector2(pillX, 0), new Vector2(190, 28), colBtnNormal);
-            CreateTMPText("PillLabel", pill.transform, "<size=10>Mode :</size>", 10, TextAlignmentOptions.Left, colTextMuted, new Vector2(-45, 0), new Vector2(50, 24));
-            selectionModeText = CreateTMPText("PillValue", pill.transform, "<b>Object</b>", 11, TextAlignmentOptions.Left, colCyanActive, new Vector2(10, 0), new Vector2(65, 24));
-            CreateTMPText("PillChevron", pill.transform, "<b>v</b>", 9, TextAlignmentOptions.Right, colTextMuted, new Vector2(75, 0), new Vector2(16, 24));
+            float pillX = -130f;
+            GameObject pill = CreateUIPanel("SelectionPill", bar.transform, new Vector2(pillX, 0), new Vector2(170, 28), colBtnNormal);
+            var pillBdr = pill.AddComponent<Outline>();
+            pillBdr.effectColor = colBtnBorder;
+            pillBdr.effectDistance = new Vector2(1, -1);
 
-            // Status Indicator Pill
-            float statusX = 140f;
-            GameObject statusPill = CreateUIPanel("StatusPill", bar.transform, new Vector2(statusX, 0), new Vector2(150, 28), new Color(0.06f, 0.09f, 0.14f, 0.85f));
-            CreateTMPText("StatusDot", statusPill.transform, "<b>*</b>", 12, TextAlignmentOptions.Center, new Color(0.2f, 0.9f, 0.35f, 1f), new Vector2(-60, 0), new Vector2(16, 24));
-            statusText = CreateTMPText("StatusText", statusPill.transform, "<size=11>Ready</size>", 11, TextAlignmentOptions.Left, colTextLight, new Vector2(10, 0), new Vector2(110, 24));
+            CreateTMPText("PillLabel", pill.transform, "<size=9.5><b>Mode:</b></size>", 9.5f, TextAlignmentOptions.Left, colTextSecondary, new Vector2(-38, 0), new Vector2(46, 24));
+            selectionModeText = CreateTMPText("PillValue", pill.transform, "<b>Object</b>", 10.5f, TextAlignmentOptions.Left, colCyanActive, new Vector2(12, 0), new Vector2(65, 24));
+            CreateTMPText("PillChevron", pill.transform, "<b>v</b>", 8.5f, TextAlignmentOptions.Right, colTextSecondary, new Vector2(68, 0), new Vector2(16, 24));
+
+            // Status Indicator Pill - expanded width for full readability of CAD messages
+            float statusX = 180f;
+            GameObject statusPill = CreateUIPanel("StatusPill", bar.transform, new Vector2(statusX, 0), new Vector2(400, 28), new Color(0.06f, 0.09f, 0.15f, 0.95f));
+            var statusBdr = statusPill.AddComponent<Outline>();
+            statusBdr.effectColor = new Color(0.20f, 0.32f, 0.48f, 0.8f);
+            statusBdr.effectDistance = new Vector2(1, -1);
+
+            CreateTMPText("StatusDot", statusPill.transform, "<size=8><b>(o)</b></size>", 8, TextAlignmentOptions.Center, new Color(0.2f, 0.95f, 0.40f, 1f), new Vector2(-185, 0), new Vector2(20, 24));
+            statusText = CreateTMPText("StatusText", statusPill.transform, "Ready", 10.5f, TextAlignmentOptions.Left, colTextLight, new Vector2(10, 0), new Vector2(360, 24));
 
             // Right Action Buttons: Undo, Redo, Settings, Close
             float rx = TOP_BAR_W * 0.5f - 25;
             CreateTopBarBtn("Btn_Close", bar.transform, new Vector2(rx, 0), "<b>X</b>", colRedClear, () => CADManagerHub.Instance?.EmitStatus("CAD Session Running"));
-            CreateTopBarBtn("Btn_Settings", bar.transform, new Vector2(rx - 38, 0), "<size=9><b>CFG</b></size>", colTextMuted, () => CADManagerHub.Instance?.EmitStatus("Settings"));
-            CreateTopBarBtn("Btn_Redo", bar.transform, new Vector2(rx - 76, 0), "<b>></b>", colTextMuted, () => CADManagerHub.Instance?.Redo());
-            CreateTopBarBtn("Btn_Undo", bar.transform, new Vector2(rx - 114, 0), "<b><</b>", colTextMuted, () => CADManagerHub.Instance?.Undo());
+            CreateTopBarBtn("Btn_Settings", bar.transform, new Vector2(rx - 38, 0), "<size=8.5><b>CFG</b></size>", colTextSecondary, () => CADManagerHub.Instance?.EmitStatus("Settings"));
+            CreateTopBarBtn("Btn_Redo", bar.transform, new Vector2(rx - 76, 0), "<size=8.5><b>RDO</b></size>", colTextSecondary, () => CADManagerHub.Instance?.Redo());
+            CreateTopBarBtn("Btn_Undo", bar.transform, new Vector2(rx - 114, 0), "<size=8.5><b>UND</b></size>", colTextSecondary, () => CADManagerHub.Instance?.Undo());
         }
 
         private void CreateTopBarBtn(string name, Transform parent, Vector2 pos, string icon, Color iconColor, Action onClick)
@@ -385,20 +414,26 @@ namespace VRCAD.UI
             obj.transform.SetParent(parent, false);
             RectTransform rect = obj.AddComponent<RectTransform>();
             rect.anchoredPosition = pos;
-            rect.sizeDelta = new Vector2(30, 28);
+            rect.sizeDelta = new Vector2(32, 28);
 
             Image img = obj.AddComponent<Image>();
-            img.color = Color.clear;
+            img.color = colBtnNormal;
+
+            var outline = obj.AddComponent<Outline>();
+            outline.effectColor = colBtnBorder;
+            outline.effectDistance = new Vector2(1, -1);
 
             Button btn = obj.AddComponent<Button>();
             ColorBlock cb = btn.colors;
-            cb.normalColor = Color.clear;
-            cb.highlightedColor = new Color(1, 1, 1, 0.08f);
-            cb.pressedColor = colCyanActive * 0.4f;
+            cb.normalColor = colBtnNormal;
+            cb.highlightedColor = colBtnHover;
+            cb.pressedColor = colCyanActive;
+            cb.selectedColor = colBtnNormal;
+            cb.fadeDuration = 0.06f;
             btn.colors = cb;
             if (onClick != null) btn.onClick.AddListener(() => onClick());
 
-            CreateTMPText("Icon", obj.transform, icon, 14, TextAlignmentOptions.Center, iconColor, Vector2.zero, new Vector2(30, 28));
+            CreateTMPText("Icon", obj.transform, icon, 12, TextAlignmentOptions.Center, iconColor, Vector2.zero, new Vector2(32, 28));
         }
 
         #endregion
@@ -876,7 +911,7 @@ namespace VRCAD.UI
             CADShapeType[] types = { CADShapeType.Box, CADShapeType.Cylinder, CADShapeType.Sphere, CADShapeType.Cone, CADShapeType.Prism, CADShapeType.Wedge };
 
             float btnW = 46f;
-            float btnH = 50f;
+            float btnH = 46f;
             float gap = 5f;
 
             int cols = 3;
@@ -888,12 +923,30 @@ namespace VRCAD.UI
                 int row = i / cols;
                 int col = i % cols;
                 float bx = sx + col * (btnW + gap);
-                float by = 75f - row * (btnH + gap + 10);
+                float by = 92f - row * (btnH + 6f);
                 bool active = (i == 0);
 
                 CreatePrimitiveButton($"Prim_{names[i]}", card.transform, new Vector2(bx, by), new Vector2(btnW, btnH),
                     icons[i], names[i], types[i], active);
             }
+
+            // Quick Actions Section
+            CreateUIPanel("SepCreate", card.transform, new Vector2(0, 5f), new Vector2(size.x - 14f, 1), new Color(0.16f, 0.24f, 0.38f, 0.75f));
+            CreateTMPText("QuickHdr", card.transform, "<size=8.5><b>QUICK ACTIONS</b></size>", 8.5f, TextAlignmentOptions.Left, colHeaderLight,
+                new Vector2(-size.x * 0.5f + 12f + (size.x - 24f) * 0.5f, -8f), new Vector2(size.x - 24f, 14f));
+
+            CreateStyledButton("Btn_QuickBox", card.transform, new Vector2(0, -34f), new Vector2(size.x - 22f, 24f),
+                "<size=9><b>+ Quick Cube</b></size>", colBtnNormal, colCyanGlow * 0.6f, () => CADManagerHub.Instance?.CreatePrimitive(CADShapeType.Box));
+
+            CreateStyledButton("Btn_QuickCyl", card.transform, new Vector2(0, -64f), new Vector2(size.x - 22f, 24f),
+                "<size=9><b>+ Quick Cylinder</b></size>", colBtnNormal, colCyanGlow * 0.6f, () => CADManagerHub.Instance?.CreatePrimitive(CADShapeType.Cylinder));
+
+            // Origin / Grid Alignment Note
+            GameObject noteBox = CreateUIPanel("CreateNote", card.transform, new Vector2(0, -114f), new Vector2(size.x - 22f, 52f), colInsetField);
+            var nbOutline = noteBox.AddComponent<Outline>();
+            nbOutline.effectColor = colBtnBorder;
+            nbOutline.effectDistance = new Vector2(1, -1);
+            CreateTMPText("NoteText", noteBox.transform, "<size=7.5><b>WORKSPACE ORIGIN</b>\nSpawn at table center\nAuto snap to grid</size>", 7.5f, TextAlignmentOptions.Center, colTextSecondary, Vector2.zero, new Vector2(size.x - 26f, 48f));
         }
 
         private void CreatePrimitiveButton(string name, Transform parent, Vector2 pos, Vector2 size, string icon, string label, CADShapeType shapeType, bool activeByDefault)
@@ -909,11 +962,17 @@ namespace VRCAD.UI
             Image img = obj.AddComponent<Image>();
             img.color = bgCol;
 
+            var outline = obj.AddComponent<Outline>();
+            outline.effectColor = activeByDefault ? colCyanGlow : colBtnBorder;
+            outline.effectDistance = new Vector2(1, -1);
+
             Button btn = obj.AddComponent<Button>();
             ColorBlock cb = btn.colors;
             cb.normalColor = bgCol;
             cb.highlightedColor = bgCol * 1.25f;
             cb.pressedColor = colCyanActive;
+            cb.selectedColor = bgCol;
+            cb.fadeDuration = 0.06f;
             btn.colors = cb;
 
             if (activeByDefault) activePrimitiveBtn = btn;
@@ -926,8 +985,8 @@ namespace VRCAD.UI
                 CADManagerHub.Instance?.CreatePrimitive(shapeType);
             });
 
-            CreateTMPText("Icon", obj.transform, icon, 11, TextAlignmentOptions.Center, colTextLight, new Vector2(0, 7), new Vector2(size.x, 22));
-            CreateTMPText("Label", obj.transform, $"<size=8>{label}</size>", 8, TextAlignmentOptions.Center, colTextLight, new Vector2(0, -12), new Vector2(size.x, 14));
+            CreateTMPText("Icon", obj.transform, $"<b>{icon}</b>", 10.5f, TextAlignmentOptions.Center, colTextLight, new Vector2(0, 7), new Vector2(size.x, 20));
+            CreateTMPText("Label", obj.transform, $"<size=8><b>{label}</b></size>", 8, TextAlignmentOptions.Center, colTextSecondary, new Vector2(0, -11), new Vector2(size.x, 14));
         }
 
         // ─── 3. TRANSFORM CARD (Interactive Dimensions & Steppers) ───
@@ -936,25 +995,28 @@ namespace VRCAD.UI
             GameObject card = CreateCardPanel("Card_Transform", parent, pos, size, "TRANSFORM", true);
 
             // Position Section
-            CreateTMPText("PosHdr", card.transform, "<size=10><b>Position</b></size>", 10, TextAlignmentOptions.Left, colTextMuted, new Vector2(0, 110), new Vector2(size.x - 24f, 16f));
+            CreateTMPText("PosHdr", card.transform, "<size=9.5><b>POSITION (m)</b></size>", 9.5f, TextAlignmentOptions.Left, colHeaderLight, new Vector2(0, 110), new Vector2(size.x - 24f, 16f));
             var posFields = CreateInteractiveXYZRow(card.transform, new Vector2(0, 85), size.x - 20f, 0, "0.000", "0.000", "0.000");
             posXText = posFields.Item1;
             posYText = posFields.Item2;
             posZText = posFields.Item3;
 
             // Rotation Section
-            CreateTMPText("RotHdr", card.transform, "<size=10><b>Rotation</b></size>", 10, TextAlignmentOptions.Left, colTextMuted, new Vector2(0, 35), new Vector2(size.x - 24f, 16f));
+            CreateTMPText("RotHdr", card.transform, "<size=9.5><b>ROTATION (deg)</b></size>", 9.5f, TextAlignmentOptions.Left, colHeaderLight, new Vector2(0, 35), new Vector2(size.x - 24f, 16f));
             var rotFields = CreateInteractiveXYZRow(card.transform, new Vector2(0, 10), size.x - 20f, 1, "0.000", "0.000", "0.000");
             rotXText = rotFields.Item1;
             rotYText = rotFields.Item2;
             rotZText = rotFields.Item3;
 
             // Scale Section
-            CreateTMPText("ScaHdr", card.transform, "<size=10><b>Scale</b></size>", 10, TextAlignmentOptions.Left, colTextMuted, new Vector2(0, -40), new Vector2(size.x - 24f, 16f));
+            CreateTMPText("ScaHdr", card.transform, "<size=9.5><b>SCALE (m)</b></size>", 9.5f, TextAlignmentOptions.Left, colHeaderLight, new Vector2(0, -40), new Vector2(size.x - 24f, 16f));
             var scaFields = CreateInteractiveXYZRow(card.transform, new Vector2(0, -65), size.x - 20f, 2, "0.200", "0.200", "0.200");
             scaleXText = scaFields.Item1;
             scaleYText = scaFields.Item2;
             scaleZText = scaFields.Item3;
+
+            // Tip note at bottom
+            CreateTMPText("TransTip", card.transform, "<size=7.5>Click values to enter exact numbers</size>", 7.5f, TextAlignmentOptions.Center, colTextMuted, new Vector2(0, -118f), new Vector2(size.x - 20f, 18f));
         }
 
         private (TextMeshProUGUI, TextMeshProUGUI, TextMeshProUGUI) CreateInteractiveXYZRow(Transform parent, Vector2 pos, float width, int section, string defX, string defY, string defZ)
@@ -963,7 +1025,7 @@ namespace VRCAD.UI
             row.transform.SetParent(parent, false);
             RectTransform rect = row.AddComponent<RectTransform>();
             rect.anchoredPosition = pos;
-            rect.sizeDelta = new Vector2(width, 22);
+            rect.sizeDelta = new Vector2(width, 24);
 
             float groupW = 76f;
             float gap = 4f;
@@ -984,29 +1046,34 @@ namespace VRCAD.UI
                 group.transform.SetParent(row.transform, false);
                 RectTransform grpRect = group.AddComponent<RectTransform>();
                 grpRect.anchoredPosition = new Vector2(gx, 0);
-                grpRect.sizeDelta = new Vector2(groupW, 22);
+                grpRect.sizeDelta = new Vector2(groupW, 24);
 
-                CreateMiniStepBtn("-", group.transform, new Vector2(-groupW * 0.5f + 8, 0), new Vector2(16, 18), () =>
+                CreateMiniStepBtn("-", group.transform, new Vector2(-groupW * 0.5f + 9, 0), new Vector2(17, 20), () =>
                 {
                     OnStepDimension(section, aIdx, -1);
                 });
 
-                GameObject valBox = CreateUIPanel("ValBox", group.transform, new Vector2(0, 0), new Vector2(44, 20), colInsetField);
+                GameObject valBox = CreateUIPanel("ValBox", group.transform, new Vector2(0, 0), new Vector2(40, 20), colInsetField);
+                var vbOutline = valBox.AddComponent<Outline>();
+                vbOutline.effectColor = colBtnBorder;
+                vbOutline.effectDistance = new Vector2(1, -1);
+
                 Button valBtn = valBox.AddComponent<Button>();
                 ColorBlock cb = valBtn.colors;
                 cb.normalColor = colInsetField;
                 cb.highlightedColor = colBtnHover;
                 cb.pressedColor = colCyanActive * 0.5f;
+                cb.fadeDuration = 0.06f;
                 valBtn.colors = cb;
                 valBtn.onClick.AddListener(() =>
                 {
                     OpenNumpadModal(section, aIdx);
                 });
 
-                CreateTMPText("Badge", valBox.transform, axes[axis], 7.5f, TextAlignmentOptions.Left, axisColors[axis], new Vector2(-15, 0), new Vector2(10, 16));
-                texts[axis] = CreateTMPText("Val", valBox.transform, defVals[axis], 8.5f, TextAlignmentOptions.Right, colTextLight, new Vector2(5, 0), new Vector2(30, 16));
+                CreateTMPText("Badge", valBox.transform, $"<b>{axes[axis]}</b>", 8f, TextAlignmentOptions.Left, axisColors[axis], new Vector2(-12, 0), new Vector2(12, 16));
+                texts[axis] = CreateTMPText("Val", valBox.transform, defVals[axis], 8.5f, TextAlignmentOptions.Right, colTextLight, new Vector2(6, 0), new Vector2(26, 16));
 
-                CreateMiniStepBtn("+", group.transform, new Vector2(groupW * 0.5f - 8, 0), new Vector2(16, 18), () =>
+                CreateMiniStepBtn("+", group.transform, new Vector2(groupW * 0.5f - 9, 0), new Vector2(17, 20), () =>
                 {
                     OnStepDimension(section, aIdx, +1);
                 });
@@ -1045,15 +1112,21 @@ namespace VRCAD.UI
             Image img = obj.AddComponent<Image>();
             img.color = colBtnNormal;
 
+            var outline = obj.AddComponent<Outline>();
+            outline.effectColor = colBtnBorder;
+            outline.effectDistance = new Vector2(1, -1);
+
             Button btn = obj.AddComponent<Button>();
             ColorBlock cb = btn.colors;
             cb.normalColor = colBtnNormal;
             cb.highlightedColor = colBtnHover;
             cb.pressedColor = colCyanActive;
+            cb.selectedColor = colBtnNormal;
+            cb.fadeDuration = 0.06f;
             btn.colors = cb;
             if (onClick != null) btn.onClick.AddListener(() => onClick());
 
-            CreateTMPText("Lbl", obj.transform, text, 11, TextAlignmentOptions.Center, colTextLight, Vector2.zero, size);
+            CreateTMPText("Lbl", obj.transform, $"<b>{text}</b>", 11, TextAlignmentOptions.Center, colTextLight, Vector2.zero, size);
         }
 
         // ─── 4. SNAP CARD ───
@@ -1062,7 +1135,7 @@ namespace VRCAD.UI
             GameObject card = CreateCardPanel("Card_Snap", parent, pos, size, "SNAP & ALIGN", true);
 
             // Grid Snap
-            CreateTMPText("GridHdr", card.transform, "<size=9><b>Grid Snap</b></size>", 9, TextAlignmentOptions.Left, colTextMuted, new Vector2(0, 110), new Vector2(size.x - 24f, 16f));
+            CreateTMPText("GridHdr", card.transform, "<size=9><b>GRID SNAP</b></size>", 9, TextAlignmentOptions.Left, colHeaderLight, new Vector2(0, 110), new Vector2(size.x - 24f, 16f));
 
             string[] gridLabels = { "1mm", "5mm", "10mm", "50mm" };
             float[] gridValues = { 0.001f, 0.005f, 0.010f, 0.050f };
@@ -1082,7 +1155,7 @@ namespace VRCAD.UI
             }
 
             // Angle Snap
-            CreateTMPText("AngHdr", card.transform, "<size=9><b>Angle Snap</b></size>", 9, TextAlignmentOptions.Left, colTextMuted, new Vector2(0, 38), new Vector2(size.x - 24f, 16f));
+            CreateTMPText("AngHdr", card.transform, "<size=9><b>ANGLE SNAP</b></size>", 9, TextAlignmentOptions.Left, colHeaderLight, new Vector2(0, 38), new Vector2(size.x - 24f, 16f));
 
             string[] angLabels = { "5°", "15°", "45°", "90°" };
             float[] angValues = { 5f, 15f, 45f, 90f };
@@ -1098,7 +1171,7 @@ namespace VRCAD.UI
             }
 
             // Axis Lock
-            CreateTMPText("LockHdr", card.transform, "<size=9><b>AXIS LOCK</b></size>", 9, TextAlignmentOptions.Left, colTextMuted, new Vector2(0, -36), new Vector2(size.x - 24f, 16f));
+            CreateTMPText("LockHdr", card.transform, "<size=9><b>AXIS LOCK</b></size>", 9, TextAlignmentOptions.Left, colHeaderLight, new Vector2(0, -36), new Vector2(size.x - 24f, 16f));
 
             float aBtnW = 48f;
             float aGap = 6f;
@@ -1114,9 +1187,70 @@ namespace VRCAD.UI
             {
                 int idx = i;
                 float bx = asx + i * (aBtnW + aGap);
-                Button btn = CreateAxisLockBtn($"Lock_{ax[i]}", card.transform, new Vector2(bx, -64), new Vector2(aBtnW, 26), ax[i], axColors[i], () => ToggleAxisLock(csts[idx]));
+                bool isActive = (currentAxisLock == csts[i]);
+                Button btn = CreateAxisLockBtn($"Lock_{ax[i]}", card.transform, new Vector2(bx, -64), new Vector2(aBtnW, 26), ax[i], axColors[i], isActive, () => ToggleAxisLock(csts[idx]));
                 axisLockButtons[ax[i]] = btn;
             }
+
+            // Reset Constraints button
+            CreateStyledButton("Btn_ResetLocks", card.transform, new Vector2(0, -102f), new Vector2(size.x - 22f, 22f),
+                "<size=8.5><b>Reset Axis Locks</b></size>", colBtnNormal, colBtnBorder, () =>
+                {
+                    currentAxisLock = AxisConstraint.None;
+                    if (CADManagerHub.Instance?.TransformManager != null)
+                        CADManagerHub.Instance.TransformManager.ActiveConstraint = AxisConstraint.None;
+                    for (int i = 0; i < ax.Length; i++)
+                        if (axisLockButtons.TryGetValue(ax[i], out Button b)) SetBtnColor(b, axColors[i] * 0.45f);
+                    CADManagerHub.Instance?.EmitStatus("Axis Locks Reset");
+                });
+
+            // Snap Tip
+            CreateTMPText("SnapTip", card.transform, "<size=7.5>Hold Shift in Desktop to toggle precision</size>", 7.5f, TextAlignmentOptions.Center, colTextMuted, new Vector2(0, -132f), new Vector2(size.x - 20f, 18f));
+        }
+
+        private void AdjustHoleRadius(float delta)
+        {
+            holeRadius = Mathf.Clamp(holeRadius + delta, 0.005f, 0.150f);
+            if (holeRadiusText != null) holeRadiusText.text = $"{holeRadius * 1000f:F0}mm";
+            CADManagerHub.Instance?.EmitStatus($"Hole Radius: {holeRadius * 1000f:F0}mm");
+        }
+
+        private void AdjustHoleDepth(float delta)
+        {
+            holeDepth = Mathf.Clamp(holeDepth + delta, 0.010f, 0.500f);
+            if (holeDepthText != null) holeDepthText.text = $"{holeDepth * 1000f:F0}mm";
+            CADManagerHub.Instance?.EmitStatus($"Hole Depth: {holeDepth * 1000f:F0}mm");
+        }
+
+        private void SetHoleType(HoleType type)
+        {
+            activeHoleType = type;
+            if (holeTypeThroughBtn != null) SetBtnColor(holeTypeThroughBtn, type == HoleType.Through ? colCyanActive : colBtnNormal);
+            if (holeTypeBlindBtn != null) SetBtnColor(holeTypeBlindBtn, type == HoleType.Blind ? colCyanActive : colBtnNormal);
+            CADManagerHub.Instance?.EmitStatus($"Hole Type: {type}");
+        }
+
+        private void BuildParameterStepperRow(Transform parent, string label, Vector2 pos, float width, string initialVal, Action onMinus, Action onPlus, out TextMeshProUGUI valText)
+        {
+            GameObject row = new GameObject("StepRow_" + label);
+            row.transform.SetParent(parent, false);
+            RectTransform rect = row.AddComponent<RectTransform>();
+            rect.anchoredPosition = pos;
+            rect.sizeDelta = new Vector2(width, 24);
+
+            CreateTMPText("Lbl", row.transform, $"<b>{label}</b>", 9f, TextAlignmentOptions.Left, colHeaderLight,
+                new Vector2(-width * 0.5f + 24f, 0), new Vector2(50f, 20f));
+
+            float rightStartX = width * 0.5f - 46f;
+            CreateMiniStepBtn("-", row.transform, new Vector2(rightStartX - 42f, 0), new Vector2(20f, 22f), onMinus);
+
+            GameObject valBox = CreateUIPanel("ValBox", row.transform, new Vector2(rightStartX - 15f, 0), new Vector2(38f, 22f), colInsetField);
+            var vOutline = valBox.AddComponent<Outline>();
+            vOutline.effectColor = colBtnBorder;
+            vOutline.effectDistance = new Vector2(1, -1);
+            valText = CreateTMPText("Val", valBox.transform, initialVal, 9f, TextAlignmentOptions.Center, colCyanGlow, Vector2.zero, new Vector2(38f, 22f));
+
+            CreateMiniStepBtn("+", row.transform, new Vector2(rightStartX + 12f, 0), new Vector2(20f, 22f), onPlus);
         }
 
         // ─── 5. OPERATIONS CARD ───
@@ -1124,8 +1258,9 @@ namespace VRCAD.UI
         {
             GameObject card = CreateCardPanel("Card_Operations", parent, pos, size, "OPERATIONS", true);
 
-            string[] names = { "Extrude", "Bevel", "Chamfer", "Intrusion", "Union", "Subtract" };
-            string[] icons = { "EXT", "BEV", "CHM", "CUT", "UNI", "SUB" };
+            string[] names = { "Extrude", "Bevel", "Chamfer", "Intrusion", "Union", "Subtract", "Intersect", "Through Hole", "Blind Hole" };
+            string[] icons = { "EXT", "BEV", "CHM", "CUT", "UNI", "SUB", "XSEC", "THRU", "BLND" };
+            string[] labels = { "Extrude", "Bevel", "Chamfer", "Intrude", "Union", "Subtract", "Intersect", "Thru Hole", "Blind Hole" };
             Action[] actions = {
                 () => CADManagerHub.Instance?.ExtrudeSelection(0.05f),
                 () => CADManagerHub.Instance?.ApplyBevelToSelection(0.03f),
@@ -1133,11 +1268,14 @@ namespace VRCAD.UI
                 () => CADManagerHub.Instance?.ToggleIntrusionTool(),
                 () => CADManagerHub.Instance?.PerformUnion(),
                 () => CADManagerHub.Instance?.PerformCombine(),
+                () => CADManagerHub.Instance?.PerformIntersect(),
+                () => CADManagerHub.Instance?.CutHoleInSelection(holeRadius, holeDepth, HoleType.Through),
+                () => CADManagerHub.Instance?.CutHoleInSelection(holeRadius, holeDepth, HoleType.Blind),
             };
 
             float btnW = 54f;
-            float btnH = 50f;
-            float gap = 5f;
+            float btnH = 42f;
+            float gap = 4f;
 
             int cols = 3;
             float totalRowW = cols * btnW + (cols - 1) * gap;
@@ -1148,13 +1286,49 @@ namespace VRCAD.UI
                 int row = i / cols;
                 int col = i % cols;
                 float bx = sx + col * (btnW + gap);
-                float by = 65f - row * (btnH + gap + 10);
+                float by = 108f - row * (btnH + 4f);
 
-                CreateIconBtn(names[i], card.transform, new Vector2(bx, by), new Vector2(btnW, btnH), icons[i], names[i], actions[i]);
+                CreateIconBtn(names[i], card.transform, new Vector2(bx, by), new Vector2(btnW, btnH), icons[i], labels[i], actions[i]);
             }
+
+            // Separator line before Hole Parameters
+            CreateUIPanel("SepHole", card.transform, new Vector2(0, -14f), new Vector2(size.x - 14f, 1), new Color(0.16f, 0.24f, 0.38f, 0.75f));
+
+            // Section Header: HOLE PARAMETERS
+            CreateTMPText("HoleHdr", card.transform, "<size=8.5><b>HOLE PARAMETERS</b></size>", 8.5f, TextAlignmentOptions.Left, colHeaderLight,
+                new Vector2(-size.x * 0.5f + 12f + (size.x - 24f) * 0.5f, -26f), new Vector2(size.x - 24f, 14f));
+
+            // Parameter Row 1: Radius (mm)
+            BuildParameterStepperRow(card.transform, "Radius", new Vector2(0, -50f), size.x - 20f,
+                $"{holeRadius * 1000f:F0}mm", () => AdjustHoleRadius(-0.005f), () => AdjustHoleRadius(0.005f), out holeRadiusText);
+
+            // Parameter Row 2: Depth (mm)
+            BuildParameterStepperRow(card.transform, "Depth", new Vector2(0, -76f), size.x - 20f,
+                $"{holeDepth * 1000f:F0}mm", () => AdjustHoleDepth(-0.010f), () => AdjustHoleDepth(0.010f), out holeDepthText);
+
+            // Parameter Row 3: Hole Type Toggle Buttons (Centered text labels)
+            float typeBtnW = (size.x - 26f) * 0.5f;
+            float typeBtnH = 24f;
+            float typeY = -104f;
+
+            holeTypeThroughBtn = CreateIconBtnColored("Btn_HoleThrough", card.transform,
+                new Vector2(-typeBtnW * 0.5f - 2f, typeY), new Vector2(typeBtnW, typeBtnH),
+                "", "Through", activeHoleType == HoleType.Through ? colCyanActive : colBtnNormal,
+                () => SetHoleType(HoleType.Through));
+
+            holeTypeBlindBtn = CreateIconBtnColored("Btn_HoleBlind", card.transform,
+                new Vector2(typeBtnW * 0.5f + 2f, typeY), new Vector2(typeBtnW, typeBtnH),
+                "", "Blind", activeHoleType == HoleType.Blind ? colCyanActive : colBtnNormal,
+                () => SetHoleType(HoleType.Blind));
+
+            // Execute Hole Cut Action Button
+            float execY = -135f;
+            CreateStyledButton("Btn_ApplyHole", card.transform, new Vector2(0, execY), new Vector2(size.x - 22f, 26f),
+                "<size=9.5><b>Cut Hole In Face</b></size>", colBlueAction, colCyanGlow * 0.8f,
+                () => CADManagerHub.Instance?.CutHoleInSelection(holeRadius, holeDepth, activeHoleType));
         }
 
-        // ─── 6. SELECTION CARD ───
+        // ─── 6. SELECTION CARD (No dead space, active target stats) ───
         private void BuildSelectionCard(Transform parent, Vector2 pos, Vector2 size)
         {
             GameObject card = CreateCardPanel("Card_Selection", parent, pos, size, "SELECTION", false);
@@ -1163,8 +1337,8 @@ namespace VRCAD.UI
             string[] mIcons = { "OBJ", "FACE", "EDGE", "VERT" };
             SelectionMode[] mModes = { SelectionMode.Object, SelectionMode.Face, SelectionMode.Edge, SelectionMode.Vertex };
 
-            float btnW = 46f;
-            float btnH = 50f;
+            float btnW = 50f;
+            float btnH = 46f;
             float gap = 5f;
 
             selectionModeButtons.Clear();
@@ -1174,26 +1348,58 @@ namespace VRCAD.UI
                 int row = i / 2;
                 int col = i % 2;
                 float bx = -btnW * 0.5f - gap * 0.5f + col * (btnW + gap);
-                float by = 65f - row * (btnH + gap + 10);
+                float by = 96f - row * (btnH + gap);
                 bool active = (mModes[i] == currentSelectionMode);
                 Color bg = active ? colCyanActive : colBtnNormal;
 
                 Button btn = CreateIconBtnColored($"Sel_{mNames[i]}", card.transform, new Vector2(bx, by), new Vector2(btnW, btnH), mIcons[i], mNames[i], bg, () => SetSelectionMode(mModes[idx]));
                 selectionModeButtons[mNames[i]] = btn;
             }
+
+            // Separator line before target details
+            CreateUIPanel("SepSel", card.transform, new Vector2(0, 16f), new Vector2(size.x - 14f, 1), new Color(0.16f, 0.24f, 0.38f, 0.75f));
+
+            // Section Header: ACTIVE TARGET
+            CreateTMPText("TargetHdr", card.transform, "<size=8.5><b>ACTIVE TARGET</b></size>", 8.5f, TextAlignmentOptions.Left, colHeaderLight,
+                new Vector2(-size.x * 0.5f + 12f + (size.x - 24f) * 0.5f, 3f), new Vector2(size.x - 24f, 14f));
+
+            // Mode Tag Pill
+            GameObject modeTag = CreateUIPanel("ModeTag", card.transform, new Vector2(0, -22f), new Vector2(size.x - 18f, 22f), colInsetField);
+            var mtOutline = modeTag.AddComponent<Outline>();
+            mtOutline.effectColor = colCyanGlow * 0.7f;
+            mtOutline.effectDistance = new Vector2(1, -1);
+            selectionModeTagText = CreateTMPText("ModeTagVal", modeTag.transform, $"<b>MODE: {currentSelectionMode.ToString().ToUpper()}</b>", 8f, TextAlignmentOptions.Center, colCyanGlow, Vector2.zero, new Vector2(size.x - 18f, 22f));
+
+            // Target Info Box
+            GameObject infoBox = CreateUIPanel("InfoBox", card.transform, new Vector2(0, -70f), new Vector2(size.x - 18f, 62f), colInsetField);
+            var ibOutline = infoBox.AddComponent<Outline>();
+            ibOutline.effectColor = colBtnBorder;
+            ibOutline.effectDistance = new Vector2(1, -1);
+
+            selectionTargetText = CreateTMPText("TargetName", infoBox.transform, "<b>No Selection</b>", 8.5f, TextAlignmentOptions.Center, colTextLight, new Vector2(0, 15f), new Vector2(size.x - 22f, 20f));
+            selectionDetailsText = CreateTMPText("TargetStats", infoBox.transform, "<size=7.5>Click object in scene\nor use Create panel</size>", 7.5f, TextAlignmentOptions.Center, colTextSecondary, new Vector2(0, -10f), new Vector2(size.x - 22f, 26f));
+
+            // Deselect Button
+            CreateStyledButton("Btn_Deselect", card.transform, new Vector2(0, -122f), new Vector2(size.x - 18f, 24f),
+                "<size=8.5><b>Deselect All</b></size>", colBtnNormal, colBtnBorder, () =>
+                {
+                    CADManagerHub.Instance?.SelectionManager?.ClearSelection();
+                    CADManagerHub.Instance?.EmitStatus("Deselected");
+                });
         }
 
-        // ─── 7. UTILITY CARD ───
+        // ─── 7. UTILITY CARD (Tools & Scene Helpers) ───
         private void BuildUtilityCard(Transform parent, Vector2 pos, Vector2 size)
         {
             GameObject card = CreateCardPanel("Card_Utility", parent, pos, size, "UTILITY", true);
 
-            float btnW = 60f;
-            float btnH = 50f;
-            float gap = 5f;
+            float btnW = 64f;
+            float btnH = 46f;
+            float gap = 6f;
 
             string[] names = { "Constraints", "Measure", "Align", "Passthrough" };
-            string[] icons = { "CNST", "MEAS", "ALGN", "PT" };
+            string[] icons = { "LOCK", "MEAS", "ALGN", "PT" };
+            string[] labels = { "Axis Locks", "Measure", "Align Grid", "Camera PT" };
             Action[] actions = {
                 () => CADManagerHub.Instance?.EmitStatus("Constraints: None active"),
                 () => CADManagerHub.Instance?.EmitStatus("Measure Tool Ready"),
@@ -1210,37 +1416,109 @@ namespace VRCAD.UI
                 int row = i / 2;
                 int col = i % 2;
                 float bx = -btnW * 0.5f - gap * 0.5f + col * (btnW + gap);
-                float by = 65f - row * (btnH + gap + 10);
+                float by = 96f - row * (btnH + gap);
 
-                CreateIconBtn(names[i], card.transform, new Vector2(bx, by), new Vector2(btnW, btnH), icons[i], names[i], actions[idx]);
+                CreateIconBtn(names[i], card.transform, new Vector2(bx, by), new Vector2(btnW, btnH), icons[i], labels[idx], actions[idx]);
             }
+
+            // Separator before helpers
+            CreateUIPanel("SepUtil", card.transform, new Vector2(0, 16f), new Vector2(size.x - 14f, 1), new Color(0.16f, 0.24f, 0.38f, 0.75f));
+
+            // Section Header: SCENE HELPERS
+            CreateTMPText("UtilHdr", card.transform, "<size=8.5><b>SCENE HELPERS</b></size>", 8.5f, TextAlignmentOptions.Left, colHeaderLight,
+                new Vector2(-size.x * 0.5f + 12f + (size.x - 24f) * 0.5f, 3f), new Vector2(size.x - 24f, 14f));
+
+            // Helper Action 1: Align to Grid
+            CreateStyledButton("Btn_AlignGrid", card.transform, new Vector2(0, -24f), new Vector2(size.x - 20f, 24f),
+                "<size=8.5><b>Align to Grid</b></size>", colBtnNormal, colBtnBorder, () =>
+                {
+                    var sel = CADManagerHub.Instance?.SelectionManager?.SelectedObject;
+                    if (sel != null && CADManagerHub.Instance?.TransformManager != null)
+                    {
+                        sel.transform.position = CADManagerHub.Instance.TransformManager.ApplyPositionSnap(sel.transform.position);
+                        CADManagerHub.Instance.EmitStatus($"Aligned {sel.name} to Grid");
+                    }
+                    else
+                    {
+                        CADManagerHub.Instance?.EmitStatus("Select object first to align");
+                    }
+                });
+
+            // Helper Action 2: Recalculate Normals
+            CreateStyledButton("Btn_RecalcNormals", card.transform, new Vector2(0, -54f), new Vector2(size.x - 20f, 24f),
+                "<size=8.5><b>Recalculate Normals</b></size>", colBtnNormal, colBtnBorder, () =>
+                {
+                    var sel = CADManagerHub.Instance?.SelectionManager?.SelectedObject;
+                    if (sel != null && sel.MeshFilter != null && sel.MeshFilter.sharedMesh != null)
+                    {
+                        sel.MeshFilter.sharedMesh.RecalculateNormals();
+                        sel.MeshFilter.sharedMesh.RecalculateBounds();
+                        CADManagerHub.Instance?.EmitStatus($"Recalculated normals on {sel.name}");
+                    }
+                    else
+                    {
+                        CADManagerHub.Instance?.EmitStatus("Select object first");
+                    }
+                });
+
+            // Helper Action 3: Focus Center
+            CreateStyledButton("Btn_FocusSel", card.transform, new Vector2(0, -84f), new Vector2(size.x - 20f, 24f),
+                "<size=8.5><b>Focus Center</b></size>", colBtnNormal, colCyanGlow * 0.6f, () => CADManagerHub.Instance?.EmitStatus("Target in Focus"));
+
+            // Info Note
+            CreateTMPText("UtilTip", card.transform, "<size=7.5>Engine: BSP Solid Geometry\nBTP CAD Interactive Mode</size>", 7.5f, TextAlignmentOptions.Center, colTextMuted, new Vector2(0, -124f), new Vector2(size.x - 16f, 24f));
         }
 
-        // ─── 8. FILE CARD ───
+        // ─── 8. FILE CARD (Export & Workspace Controls) ───
         private void BuildFileCard(Transform parent, Vector2 pos, Vector2 size)
         {
             GameObject card = CreateCardPanel("Card_File", parent, pos, size, "FILE / EXPORT", true);
 
-            float btnW = 72f;
+            float btnW = 76f;
             float btnH = 46f;
             float gap = 6f;
 
             // Row 1: Export STL, Export OBJ
-            CreateIconBtnColored("ExpSTL", card.transform, new Vector2(-btnW * 0.5f - gap * 0.5f, 65), new Vector2(btnW, btnH), "STL", "Export STL", colGreenExport, () => CADManagerHub.Instance?.ExportSelectedSTL());
-            CreateIconBtnColored("ExpOBJ", card.transform, new Vector2(btnW * 0.5f + gap * 0.5f, 65), new Vector2(btnW, btnH), "OBJ", "Export OBJ", colGreenExport, () => CADManagerHub.Instance?.ExportSelectedOBJ());
+            CreateIconBtnColored("ExpSTL", card.transform, new Vector2(-btnW * 0.5f - gap * 0.5f, 96f), new Vector2(btnW, btnH), "STL", "Export STL", colGreenExport, () => CADManagerHub.Instance?.ExportSelectedSTL());
+            CreateIconBtnColored("ExpOBJ", card.transform, new Vector2(btnW * 0.5f + gap * 0.5f, 96f), new Vector2(btnW, btnH), "OBJ", "Export OBJ", colGreenExport, () => CADManagerHub.Instance?.ExportSelectedOBJ());
 
-            // Row 2: Clear, Undo, Redo
-            float r2Y = 3f;
-            float smW = 46f;
-            CreateIconBtnColored("Btn_ClearF", card.transform, new Vector2(-smW - gap, r2Y), new Vector2(smW, btnH), "DEL", "Clear", colRedClear, () => CADManagerHub.Instance?.ShapeManager?.ClearAll());
-            CreateIconBtn("Btn_UndoF", card.transform, new Vector2(0, r2Y), new Vector2(smW, btnH), "<", "Undo", () => CADManagerHub.Instance?.EmitStatus("Undo"));
-            CreateIconBtn("Btn_RedoF", card.transform, new Vector2(smW + gap, r2Y), new Vector2(smW, btnH), ">", "Redo", () => CADManagerHub.Instance?.EmitStatus("Redo"));
+            // Separator before project actions
+            CreateUIPanel("SepFile", card.transform, new Vector2(0, 62f), new Vector2(size.x - 14f, 1), new Color(0.16f, 0.24f, 0.38f, 0.75f));
+
+            // Section Header: PROJECT ACTIONS
+            CreateTMPText("FileHdr", card.transform, "<size=8.5><b>PROJECT ACTIONS</b></size>", 8.5f, TextAlignmentOptions.Left, colHeaderLight,
+                new Vector2(-size.x * 0.5f + 12f + (size.x - 24f) * 0.5f, 48f), new Vector2(size.x - 24f, 14f));
+
+            // Action 1: Save State
+            CreateStyledButton("Btn_SaveScene", card.transform, new Vector2(0, 22f), new Vector2(size.x - 22f, 24f),
+                "<size=8.5><b>Save Scene State</b></size>", colBtnNormal, colBtnBorder, () => CADManagerHub.Instance?.EmitStatus("Scene Snapshot Saved"));
+
+            // Action 2: Undo / Redo pair
+            float halfW = (size.x - 28f) * 0.5f;
+            CreateStyledButton("Btn_UndoF", card.transform, new Vector2(-halfW * 0.5f - 2f, -10f), new Vector2(halfW, 24f),
+                "<size=8.5><b>Undo</b></size>", colBtnNormal, colBtnBorder, () => CADManagerHub.Instance?.Undo());
+            CreateStyledButton("Btn_RedoF", card.transform, new Vector2(halfW * 0.5f + 2f, -10f), new Vector2(halfW, 24f),
+                "<size=8.5><b>Redo</b></size>", colBtnNormal, colBtnBorder, () => CADManagerHub.Instance?.Redo());
+
+            // Separator before danger zone
+            CreateUIPanel("SepDanger", card.transform, new Vector2(0, -36f), new Vector2(size.x - 14f, 1), new Color(0.16f, 0.24f, 0.38f, 0.75f));
+
+            // Danger Header
+            CreateTMPText("DangerHdr", card.transform, "<size=8.5><b>DANGER ZONE</b></size>", 8.5f, TextAlignmentOptions.Left, colRedClear,
+                new Vector2(-size.x * 0.5f + 12f + (size.x - 24f) * 0.5f, -50f), new Vector2(size.x - 24f, 14f));
+
+            // Reset Workspace
+            CreateStyledButton("Btn_ResetWS", card.transform, new Vector2(0, -78f), new Vector2(size.x - 22f, 26f),
+                "<size=9><b>Clear All Shapes</b></size>", colRedClear * 0.85f, colRedClear, () => CADManagerHub.Instance?.ShapeManager?.ClearAll());
+
+            // Metadata footer
+            CreateTMPText("FileMeta", card.transform, "<size=7.5><b>VR CAD Studio v2.0</b>\nFormat: OBJ / STL ASCII\nReady for manual test</size>", 7.5f, TextAlignmentOptions.Center, colTextMuted, new Vector2(0, -122f), new Vector2(size.x - 16f, 32f));
         }
 
         #endregion
 
         // ════════════════════════════════════════════════════════
-        //  BOTTOM ACTION DOCK
+        //  BOTTOM ACTION DOCK (Grouped & Color-Coded Controls)
         // ════════════════════════════════════════════════════════
 
         #region Bottom Dock
@@ -1250,47 +1528,51 @@ namespace VRCAD.UI
             GameObject dock = CreateUIPanel("BottomDock", parent, new Vector2(0, DOCK_Y), new Vector2(TOP_BAR_W, DOCK_H), colDockBg);
 
             // Glowing top border
-            CreateUIPanel("DockGlow", dock.transform, new Vector2(0, DOCK_H * 0.5f - 1), new Vector2(TOP_BAR_W, 2), colCardBorderGlow);
+            CreateUIPanel("DockGlow", dock.transform, new Vector2(0, DOCK_H * 0.5f - 1), new Vector2(TOP_BAR_W, 2), colCardTopHighlight);
 
-            float btnW = 74f;
-            float btnH = 36f;
-            float gap = 5f;
+            // Categorized dock buttons with purposeful color coding
+            var dockButtons = new (string label, float width, Color bgColor, Color borderColor, Action action)[]
+            {
+                // Group 1: History
+                ("Undo", 68f, colBtnNormal, colBtnBorder, () => CADManagerHub.Instance?.Undo()),
+                ("Redo", 68f, colBtnNormal, colBtnBorder, () => CADManagerHub.Instance?.Redo()),
 
-            string[] labels = { "Undo", "Redo", "Set Sub", "Arc", "Rotation", "Position", "Perform", "+Add", "Edge Mode", "Perform Cut", "Mark Union", "Perform Union" };
+                // Group 2: Quick Spawn
+                ("+ Box", 70f, colBtnNormal, colCyanGlow * 0.7f, () => CADManagerHub.Instance?.CreatePrimitive(CADShapeType.Box)),
 
-            Action[] dockActions = {
-                () => CADManagerHub.Instance?.Undo(),
-                () => CADManagerHub.Instance?.Redo(),
-                () => CADManagerHub.Instance?.MarkForCombine(),
-                () => CADManagerHub.Instance?.EmitStatus("Arc Tool"),
-                () => { var tm = CADManagerHub.Instance?.TransformManager; var sel = CADManagerHub.Instance?.SelectionManager?.SelectedObject; if (tm != null && sel != null) tm.RotateObject(sel, Vector3.up, 15f); },
-                () => { var tm = CADManagerHub.Instance?.TransformManager; var sel = CADManagerHub.Instance?.SelectionManager?.SelectedObject; if (tm != null && sel != null) tm.NudgeObject(sel, Vector3.up); },
-                () => CADManagerHub.Instance?.PerformCombine(),
-                () => CADManagerHub.Instance?.CreatePrimitive(CADShapeType.Box),
-                () => CADManagerHub.Instance?.SetSelectionMode(SelectionMode.Edge),
-                () => CADManagerHub.Instance?.PerformCombine(),
-                () => CADManagerHub.Instance?.MarkForUnion(),
-                () => CADManagerHub.Instance?.PerformUnion(),
+                // Group 3: Boolean CSG (Categorized & color coded)
+                ("Mark Sub", 80f, new Color(0.18f, 0.12f, 0.06f, 1f), new Color(0.95f, 0.55f, 0.10f, 0.9f), () => CADManagerHub.Instance?.MarkForCombine()),
+                ("Subtract", 78f, new Color(0.24f, 0.14f, 0.06f, 1f), new Color(0.98f, 0.58f, 0.12f, 1.0f), () => CADManagerHub.Instance?.PerformCombine()),
+                ("Mark Union", 84f, new Color(0.06f, 0.14f, 0.20f, 1f), colCyanActive, () => CADManagerHub.Instance?.MarkForUnion()),
+                ("Union", 76f, new Color(0.08f, 0.18f, 0.28f, 1f), colCyanGlow, () => CADManagerHub.Instance?.PerformUnion()),
+                ("Mark XSec", 82f, new Color(0.14f, 0.08f, 0.20f, 1f), new Color(0.70f, 0.35f, 0.95f, 0.9f), () => CADManagerHub.Instance?.MarkForIntersect()),
+                ("Intersect", 78f, new Color(0.18f, 0.10f, 0.26f, 1f), new Color(0.78f, 0.42f, 0.98f, 1.0f), () => CADManagerHub.Instance?.PerformIntersect()),
+
+                // Group 4: Transform & Mode Nudges
+                ("Nudge Y", 72f, colBtnNormal, colBtnBorder, () => { var tm = CADManagerHub.Instance?.TransformManager; var sel = CADManagerHub.Instance?.SelectionManager?.SelectedObject; if (tm != null && sel != null) tm.NudgeObject(sel, Vector3.up); }),
+                ("Rot 15°", 70f, colBtnNormal, colBtnBorder, () => { var tm = CADManagerHub.Instance?.TransformManager; var sel = CADManagerHub.Instance?.SelectionManager?.SelectedObject; if (tm != null && sel != null) tm.RotateObject(sel, Vector3.up, 15f); }),
+                ("Edge Mode", 80f, colBtnNormal, colBtnBorder, () => CADManagerHub.Instance?.SetSelectionMode(SelectionMode.Edge)),
+
+                // Group 5: Destructive Actions
+                ("Clear All", 84f, colBlueAction * 0.85f, colCyanActive, () => CADManagerHub.Instance?.ShapeManager?.ClearAll()),
+                ("Delete", 72f, colRedClear * 0.85f, colRedClear, () => CADManagerHub.Instance?.DeleteSelected()),
             };
 
-            float totalBtnsW = labels.Length * btnW + (labels.Length - 1) * gap + 8f + 86f + gap + 66f;
-            float startX = -totalBtnsW * 0.5f + btnW * 0.5f;
+            float gap = 5f;
+            float totalW = 0f;
+            for (int i = 0; i < dockButtons.Length; i++) totalW += dockButtons[i].width;
+            totalW += (dockButtons.Length - 1) * gap;
 
-            for (int i = 0; i < labels.Length; i++)
+            float curX = -totalW * 0.5f;
+
+            for (int i = 0; i < dockButtons.Length; i++)
             {
-                int idx = i;
-                float bx = startX + i * (btnW + gap);
-                CreateStyledButton($"Dock_{i}", dock.transform, new Vector2(bx, 0), new Vector2(btnW, btnH),
-                    $"<size=9>{labels[i]}</size>", colBtnNormal, colBtnBorder, dockActions[idx]);
+                var item = dockButtons[i];
+                float btnX = curX + item.width * 0.5f;
+                CreateStyledButton($"Dock_{i}_{item.label.Replace(" ", "_")}", dock.transform, new Vector2(btnX, 0), new Vector2(item.width, 36f),
+                    $"<size=9><b>{item.label}</b></size>", item.bgColor, item.borderColor, item.action);
+                curX += item.width + gap;
             }
-
-            float clearAllX = startX + labels.Length * (btnW + gap) - (btnW * 0.5f) + 8f + (86f * 0.5f);
-            CreateStyledButton("Dock_ClearAll", dock.transform, new Vector2(clearAllX, 0), new Vector2(86, btnH),
-                "<size=10><b>Clear All</b></size>", colBlueAction, colBlueAction * 1.2f, () => CADManagerHub.Instance?.ShapeManager?.ClearAll());
-
-            float deleteX = clearAllX + (86f * 0.5f) + gap + (66f * 0.5f);
-            CreateStyledButton("Dock_Clear", dock.transform, new Vector2(deleteX, 0), new Vector2(66, btnH),
-                "<size=10><b>Delete</b></size>", colRedClear, colRedClear * 1.2f, () => CADManagerHub.Instance?.DeleteSelected());
         }
 
         #endregion
@@ -1445,8 +1727,11 @@ namespace VRCAD.UI
             CreateUIPanel("BdrL", card.transform, new Vector2(-size.x * 0.5f + bw * 0.5f, 0), new Vector2(bw, size.y), colCardBorderGlow);
             CreateUIPanel("BdrR", card.transform, new Vector2(size.x * 0.5f - bw * 0.5f, 0), new Vector2(bw, size.y), colCardBorderGlow);
 
+            // Specular top highlight line for crisp glassmorphic CAD contour
+            CreateUIPanel("TopHighlight", card.transform, new Vector2(0, size.y * 0.5f - bw - 0.75f), new Vector2(size.x - 4f, 1.5f), colCardTopHighlight);
+
             float headerY = size.y * 0.5f - 14f;
-            CreateTMPText("Title", card.transform, $"<b>{title}</b>", 10.5f, TextAlignmentOptions.Left, colTextLight,
+            CreateTMPText("Title", card.transform, $"<b>{title}</b>", 10.5f, TextAlignmentOptions.Left, colHeaderLight,
                 new Vector2(-size.x * 0.5f + 12f + (size.x - 30f) * 0.5f, headerY), new Vector2(size.x - 30f, 20f));
 
             if (showChevron)
@@ -1455,7 +1740,7 @@ namespace VRCAD.UI
                     new Vector2(size.x * 0.5f - 14f, headerY), new Vector2(16, 20));
             }
 
-            CreateUIPanel("Sep", card.transform, new Vector2(0, headerY - 12f), new Vector2(size.x - 12f, 1), new Color(0.12f, 0.18f, 0.28f, 0.6f));
+            CreateUIPanel("Sep", card.transform, new Vector2(0, headerY - 12f), new Vector2(size.x - 12f, 1), new Color(0.16f, 0.24f, 0.38f, 0.75f));
 
             return card;
         }
@@ -1497,11 +1782,17 @@ namespace VRCAD.UI
             Image img = obj.AddComponent<Image>();
             img.color = bg;
 
+            var outline = obj.AddComponent<Outline>();
+            outline.effectColor = active ? colCyanGlow : colBtnBorder;
+            outline.effectDistance = new Vector2(1, -1);
+
             Button btn = obj.AddComponent<Button>();
             ColorBlock cb = btn.colors;
             cb.normalColor = bg;
             cb.highlightedColor = bg * 1.25f;
             cb.pressedColor = colCyanActive;
+            cb.selectedColor = bg;
+            cb.fadeDuration = 0.06f;
             btn.colors = cb;
             if (onClick != null) btn.onClick.AddListener(() => onClick());
 
@@ -1509,8 +1800,9 @@ namespace VRCAD.UI
             return btn;
         }
 
-        private Button CreateAxisLockBtn(string name, Transform parent, Vector2 pos, Vector2 size, string label, Color axisColor, Action onClick)
+        private Button CreateAxisLockBtn(string name, Transform parent, Vector2 pos, Vector2 size, string label, Color axisColor, bool active, Action onClick)
         {
+            Color bg = active ? axisColor : axisColor * 0.45f;
             GameObject obj = new GameObject(name);
             obj.transform.SetParent(parent, false);
             RectTransform rect = obj.AddComponent<RectTransform>();
@@ -1518,13 +1810,19 @@ namespace VRCAD.UI
             rect.sizeDelta = size;
 
             Image img = obj.AddComponent<Image>();
-            img.color = axisColor;
+            img.color = bg;
+
+            var outline = obj.AddComponent<Outline>();
+            outline.effectColor = active ? Color.white : axisColor * 0.7f;
+            outline.effectDistance = new Vector2(1, -1);
 
             Button btn = obj.AddComponent<Button>();
             ColorBlock cb = btn.colors;
-            cb.normalColor = axisColor;
+            cb.normalColor = bg;
             cb.highlightedColor = axisColor * 1.3f;
             cb.pressedColor = Color.white;
+            cb.selectedColor = bg;
+            cb.fadeDuration = 0.06f;
             btn.colors = cb;
             if (onClick != null) btn.onClick.AddListener(() => onClick());
 
@@ -1543,16 +1841,29 @@ namespace VRCAD.UI
             Image img = obj.AddComponent<Image>();
             img.color = colBtnNormal;
 
+            var outline = obj.AddComponent<Outline>();
+            outline.effectColor = colBtnBorder;
+            outline.effectDistance = new Vector2(1, -1);
+
             Button btn = obj.AddComponent<Button>();
             ColorBlock cb = btn.colors;
             cb.normalColor = colBtnNormal;
             cb.highlightedColor = colBtnHover;
             cb.pressedColor = colCyanActive;
+            cb.selectedColor = colBtnNormal;
+            cb.fadeDuration = 0.06f;
             btn.colors = cb;
             if (onClick != null) btn.onClick.AddListener(() => onClick());
 
-            CreateTMPText("Icon", obj.transform, $"<b>{icon}</b>", 11, TextAlignmentOptions.Center, colTextLight, new Vector2(0, 6), new Vector2(size.x, 22));
-            CreateTMPText("Lbl", obj.transform, $"<size=8>{label}</size>", 8, TextAlignmentOptions.Center, colTextMuted, new Vector2(0, -13), new Vector2(size.x, 14));
+            if (!string.IsNullOrEmpty(icon))
+            {
+                CreateTMPText("Icon", obj.transform, $"<b>{icon}</b>", 10.5f, TextAlignmentOptions.Center, colTextLight, new Vector2(0, 7), new Vector2(size.x, 20));
+                CreateTMPText("Lbl", obj.transform, $"<size=8><b>{label}</b></size>", 8, TextAlignmentOptions.Center, colTextSecondary, new Vector2(0, -11), new Vector2(size.x, 14));
+            }
+            else
+            {
+                CreateTMPText("Lbl", obj.transform, $"<size=9.5><b>{label}</b></size>", 9.5f, TextAlignmentOptions.Center, colTextLight, Vector2.zero, size);
+            }
         }
 
         private Button CreateIconBtnColored(string name, Transform parent, Vector2 pos, Vector2 size, string icon, string label, Color bgColor, Action onClick)
@@ -1566,16 +1877,29 @@ namespace VRCAD.UI
             Image img = obj.AddComponent<Image>();
             img.color = bgColor;
 
+            var outline = obj.AddComponent<Outline>();
+            outline.effectColor = (bgColor == colCyanActive) ? colCyanGlow : colBtnBorder;
+            outline.effectDistance = new Vector2(1, -1);
+
             Button btn = obj.AddComponent<Button>();
             ColorBlock cb = btn.colors;
             cb.normalColor = bgColor;
             cb.highlightedColor = bgColor * 1.25f;
             cb.pressedColor = colCyanActive;
+            cb.selectedColor = bgColor;
+            cb.fadeDuration = 0.06f;
             btn.colors = cb;
             if (onClick != null) btn.onClick.AddListener(() => onClick());
 
-            CreateTMPText("Icon", obj.transform, $"<b>{icon}</b>", 11, TextAlignmentOptions.Center, colTextLight, new Vector2(0, 6), new Vector2(size.x, 22));
-            CreateTMPText("Lbl", obj.transform, $"<size=8>{label}</size>", 8, TextAlignmentOptions.Center, colTextLight, new Vector2(0, -13), new Vector2(size.x, 14));
+            if (!string.IsNullOrEmpty(icon))
+            {
+                CreateTMPText("Icon", obj.transform, $"<b>{icon}</b>", 10.5f, TextAlignmentOptions.Center, colTextLight, new Vector2(0, 7), new Vector2(size.x, 20));
+                CreateTMPText("Lbl", obj.transform, $"<size=8><b>{label}</b></size>", 8, TextAlignmentOptions.Center, colTextLight, new Vector2(0, -11), new Vector2(size.x, 14));
+            }
+            else
+            {
+                CreateTMPText("Lbl", obj.transform, $"<size=9.5><b>{label}</b></size>", 9.5f, TextAlignmentOptions.Center, colTextLight, Vector2.zero, size);
+            }
 
             return btn;
         }
@@ -1591,11 +1915,17 @@ namespace VRCAD.UI
             Image img = obj.AddComponent<Image>();
             img.color = bgColor;
 
+            var outline = obj.AddComponent<Outline>();
+            outline.effectColor = borderColor;
+            outline.effectDistance = new Vector2(1, -1);
+
             Button btn = obj.AddComponent<Button>();
             ColorBlock cb = btn.colors;
             cb.normalColor = bgColor;
             cb.highlightedColor = bgColor * 1.25f;
             cb.pressedColor = colCyanActive;
+            cb.selectedColor = bgColor;
+            cb.fadeDuration = 0.06f;
             btn.colors = cb;
             if (onClick != null) btn.onClick.AddListener(() => onClick());
 
@@ -1645,6 +1975,12 @@ namespace VRCAD.UI
             cb.highlightedColor = col * 1.25f;
             cb.selectedColor = col;
             btn.colors = cb;
+
+            Outline outline = btn.GetComponent<Outline>();
+            if (outline != null)
+            {
+                outline.effectColor = (col == colCyanActive) ? colCyanGlow : colBtnBorder;
+            }
         }
 
         #endregion
@@ -1714,6 +2050,7 @@ namespace VRCAD.UI
                     SetBtnColor(btn, modes[i] == mode ? colCyanActive : colBtnNormal);
 
             if (selectionModeText != null) selectionModeText.text = $"<b>{mode}</b>";
+            if (selectionModeTagText != null) selectionModeTagText.text = $"<b>MODE: {mode.ToString().ToUpper()}</b>";
         }
 
         private void SetColorFromPreset(Color c)
@@ -1773,6 +2110,31 @@ namespace VRCAD.UI
 
                 isWireframeActive = selected.IsWireframeMode;
                 UpdateWireframeToggleVisual();
+
+                if (selectionTargetText != null)
+                    selectionTargetText.text = $"<b>{selected.name}</b>";
+
+                if (selectionDetailsText != null)
+                {
+                    MeshFilter mf = selected.GetComponent<MeshFilter>();
+                    if (mf != null && mf.sharedMesh != null)
+                    {
+                        int tris = mf.sharedMesh.triangles.Length / 3;
+                        int verts = mf.sharedMesh.vertexCount;
+                        selectionDetailsText.text = $"<size=7.5>Tris: <b>{tris:N0}</b> | Verts: <b>{verts:N0}</b>\nSize: {selected.transform.localScale.x * 100f:F0}×{selected.transform.localScale.y * 100f:F0}×{selected.transform.localScale.z * 100f:F0}cm</size>";
+                    }
+                    else
+                    {
+                        selectionDetailsText.text = "<size=7.5>Active Mesh Selected</size>";
+                    }
+                }
+            }
+            else
+            {
+                if (selectionTargetText != null)
+                    selectionTargetText.text = "<b>No Selection</b>";
+                if (selectionDetailsText != null)
+                    selectionDetailsText.text = "<size=7.5>Click object in scene\nor use Create panel</size>";
             }
         }
 

@@ -87,6 +87,7 @@ namespace VRCAD.XR
             EnsureControllerActive();
             UpdateControllerPosition();
             UpdateLaserAiming();
+            HandleMouseClickInteraction();
         }
 
         /// <summary>
@@ -236,10 +237,40 @@ namespace VRCAD.XR
             }
         }
 
+        private int _lastHandledClickFrame = -1;
         private bool _wasClicking = false;
 
         private void HandleMouseClickInteraction()
         {
+            if (_lastHandledClickFrame == Time.frameCount)
+            {
+                return;
+            }
+
+            // Avoid duplicate clicks if EventSystem already handles mouse inputs natively
+            if (EventSystem.current != null)
+            {
+                var inputModule = EventSystem.current.currentInputModule ?? EventSystem.current.GetComponent<BaseInputModule>();
+                if (inputModule != null)
+                {
+                    if (inputModule is UnityEngine.XR.Interaction.Toolkit.UI.XRUIInputModule xrModule)
+                    {
+                        if (xrModule.enableMouseInput)
+                        {
+                            return;
+                        }
+                    }
+                    else
+                    {
+                        string moduleName = inputModule.GetType().Name;
+                        if (moduleName.Contains("StandaloneInputModule") || moduleName.Contains("InputSystemUIInputModule"))
+                        {
+                            return;
+                        }
+                    }
+                }
+            }
+
             bool isClicking = false;
             if (Mouse.current != null)
             {
@@ -263,6 +294,8 @@ namespace VRCAD.XR
             {
                 return; // Was already clicking
             }
+
+            _lastHandledClickFrame = Time.frameCount;
 
             Vector2 mousePos = GetMousePosition();
             if (EventSystem.current == null) return;
