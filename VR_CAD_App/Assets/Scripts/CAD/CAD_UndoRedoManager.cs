@@ -83,7 +83,7 @@ namespace VRCAD.Core
     }
 
     /// <summary>
-    /// Reversible command for Boolean operations (Union, Subtract).
+    /// Reversible command for Boolean operations (Union, Subtract, Intersect).
     /// </summary>
     public class BooleanCommand : ICADCommand
     {
@@ -92,24 +92,35 @@ namespace VRCAD.Core
         private readonly Mesh targetBeforeMesh;
         private readonly Mesh targetAfterMesh;
         private readonly string description;
+        private readonly bool targetBecameEmpty;
 
         public string Description => description;
 
-        public BooleanCommand(CADObject target, CADObject toolObj, Mesh targetBeforeMesh, Mesh targetAfterMesh, string description)
+        public BooleanCommand(CADObject target, CADObject toolObj, Mesh targetBeforeMesh, Mesh targetAfterMesh, string description, bool targetBecameEmpty = false)
         {
             this.target = target;
             this.toolObj = toolObj;
             this.targetBeforeMesh = targetBeforeMesh;
             this.targetAfterMesh = targetAfterMesh;
             this.description = description;
+            this.targetBecameEmpty = targetBecameEmpty;
         }
 
         public void Undo()
         {
-            if (target != null && targetBeforeMesh != null)
+            if (target != null)
             {
-                target.SetMesh(UnityEngine.Object.Instantiate(targetBeforeMesh));
-                CADManagerHub.Instance?.OnMeshModified(target);
+                if (targetBecameEmpty)
+                {
+                    target.gameObject.SetActive(true);
+                    CADManagerHub.Instance?.ShapeManager?.RegisterObject(target);
+                }
+
+                if (targetBeforeMesh != null)
+                {
+                    target.SetMesh(UnityEngine.Object.Instantiate(targetBeforeMesh));
+                    CADManagerHub.Instance?.OnMeshModified(target);
+                }
             }
 
             if (toolObj != null)
@@ -121,10 +132,18 @@ namespace VRCAD.Core
 
         public void Redo()
         {
-            if (target != null && targetAfterMesh != null)
+            if (target != null)
             {
-                target.SetMesh(UnityEngine.Object.Instantiate(targetAfterMesh));
-                CADManagerHub.Instance?.OnMeshModified(target);
+                if (targetBecameEmpty)
+                {
+                    target.gameObject.SetActive(false);
+                    CADManagerHub.Instance?.ShapeManager?.UnregisterObject(target);
+                }
+                else if (targetAfterMesh != null)
+                {
+                    target.SetMesh(UnityEngine.Object.Instantiate(targetAfterMesh));
+                    CADManagerHub.Instance?.OnMeshModified(target);
+                }
             }
 
             if (toolObj != null)

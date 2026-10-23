@@ -23,9 +23,11 @@ namespace VRCAD.Core
         private int selectedFaceTriangleIndex = -1;
         private int selectedVertexIndex = -1;
         private (int v1, int v2) selectedEdge = (-1, -1);
+        private RaycastHit? lastHit = null;
 
         [Header("Visual Selection Helpers")]
         private GameObject selectionVisualizer;
+        private LineRenderer faceHighlightRenderer;
         private LineRenderer edgeHighlightRenderer;
         private GameObject vertexHighlightSphere;
 
@@ -44,6 +46,7 @@ namespace VRCAD.Core
         public int SelectedFaceTriangleIndex => selectedFaceTriangleIndex;
         public int SelectedVertexIndex => selectedVertexIndex;
         public (int v1, int v2) SelectedEdge => selectedEdge;
+        public RaycastHit? LastHit => lastHit;
 
         private void Awake()
         {
@@ -55,6 +58,23 @@ namespace VRCAD.Core
             if (CADManagerHub.Instance != null)
             {
                 CADManagerHub.Instance.ShapeDeleted += OnShapeDeleted;
+                CADManagerHub.Instance.MeshModified += OnMeshModified;
+            }
+        }
+
+        private void Update()
+        {
+            // Desktop mouse selection fallback when clicking in the scene
+            if (Input.GetMouseButtonDown(0))
+            {
+                if (UnityEngine.EventSystems.EventSystem.current != null && UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject())
+                    return;
+
+                Camera cam = Camera.main;
+                if (cam == null) return;
+
+                Ray ray = cam.ScreenPointToRay(Input.mousePosition);
+                RaycastSelect(ray);
             }
         }
 
@@ -63,6 +83,7 @@ namespace VRCAD.Core
             if (CADManagerHub.Instance != null)
             {
                 CADManagerHub.Instance.ShapeDeleted -= OnShapeDeleted;
+                CADManagerHub.Instance.MeshModified -= OnMeshModified;
             }
         }
 
@@ -74,10 +95,34 @@ namespace VRCAD.Core
             }
         }
 
+        private void OnMeshModified(CADObject obj)
+        {
+            if (selectedObject != null && selectedObject == obj)
+            {
+                // Mesh topology changed; clear stale sub-selection indices, hits, and visualizers
+                ClearSubSelection();
+            }
+        }
+
         private void CreateVisualHelpers()
         {
             selectionVisualizer = new GameObject("CAD_SelectionVisualizer");
             selectionVisualizer.transform.SetParent(transform);
+
+            // Face highlight LineRenderer
+            GameObject faceObj = new GameObject("FaceHighlight");
+            faceObj.transform.SetParent(selectionVisualizer.transform);
+            faceHighlightRenderer = faceObj.AddComponent<LineRenderer>();
+            faceHighlightRenderer.startWidth = 0.005f;
+            faceHighlightRenderer.endWidth = 0.005f;
+            faceHighlightRenderer.useWorldSpace = true;
+            faceHighlightRenderer.positionCount = 4;
+            Material faceMat = new Material(Shader.Find("Unlit/Color") ?? Shader.Find("Standard"))
+            {
+                color = new Color(0.0f, 0.85f, 1.0f, 1.0f)
+            };
+            faceHighlightRenderer.material = faceMat;
+            faceHighlightRenderer.enabled = false;
 
             // Edge highlight LineRenderer
             GameObject edgeObj = new GameObject("EdgeHighlight");
@@ -144,6 +189,7 @@ namespace VRCAD.Core
             }
 
             selectedObject = cadObj;
+            lastHit = hit;
             selectedObject.SetSelected(true);
 
             Mesh mesh = cadObj.MeshFilter.sharedMesh;
@@ -177,7 +223,35 @@ namespace VRCAD.Core
             if (cadObj == null || triangleIndex < 0) return;
             selectedFaceTriangleIndex = triangleIndex;
             cadObj.SetSelectedFace(triangleIndex);
-            HideVisualHelpers();
+            ShowFaceHighlight(cadObj, triangleIndex);
+            if (edgeHighlightRenderer != null) edgeHighlightRenderer.enabled = false;
+            if (vertexHighlightSphere != null) vertexHighlightSphere.SetActive(false);
+        }
+
+        private void ShowFaceHighlight(CADObject cadObj, int triangleIndex)
+        {
+            if (faceHighlightRenderer == null || cadObj == null || cadObj.MeshFilter.sharedMesh == null) return;
+
+            Mesh mesh = cadObj.MeshFilter.sharedMesh;
+            int[] tris = mesh.triangles;
+            Vector3[] verts = mesh.vertices;
+
+            if (triangleIndex * 3 + 2 >= tris.Length) return;
+
+            Transform trans = cadObj.transform;
+            Vector3 w0 = trans.TransformPoint(verts[tris[triangleIndex * 3 + 0]]);
+            Vector3 w1 = trans.TransformPoint(verts[tris[triangleIndex * 3 + 1]]);
+            Vector3 w2 = trans.TransformPoint(verts[tris[triangleIndex * 3 + 2]]);
+
+            Vector3 normal = Vector3.Cross(w1 - w0, w2 - w0).normalized;
+            Vector3 offset = normal * 0.002f;
+
+            faceHighlightRenderer.positionCount = 4;
+            faceHighlightRenderer.SetPosition(0, w0 + offset);
+            faceHighlightRenderer.SetPosition(1, w1 + offset);
+            faceHighlightRenderer.SetPosition(2, w2 + offset);
+            faceHighlightRenderer.SetPosition(3, w0 + offset);
+            faceHighlightRenderer.enabled = true;
         }
 
         public void SelectClosestVertexAt(CADObject cadObj, Vector3 hitWorldPoint)
@@ -268,8 +342,23 @@ namespace VRCAD.Core
 
         private void HideVisualHelpers()
         {
+            if (faceHighlightRenderer != null) faceHighlightRenderer.enabled = false;
             if (edgeHighlightRenderer != null) edgeHighlightRenderer.enabled = false;
             if (vertexHighlightSphere != null) vertexHighlightSphere.SetActive(false);
+        }
+
+        public void ClearSubSelection()
+        {
+            selectedFaceTriangleIndex = -1;
+            selectedVertexIndex = -1;
+            selectedEdge = (-1, -1);
+            lastHit = null;
+            HideVisualHelpers();
+            if (selectedObject != null)
+            {
+                selectedObject.ClearSubSelections();
+            }
+            CADManagerHub.Instance?.OnSelectionUpdated(selectedObject);
         }
 
         public void ClearSelection()
@@ -284,8 +373,57 @@ namespace VRCAD.Core
             selectedFaceTriangleIndex = -1;
             selectedVertexIndex = -1;
             selectedEdge = (-1, -1);
+            lastHit = null;
             HideVisualHelpers();
             CADManagerHub.Instance?.OnSelectionUpdated(null);
+        }
+
+        /// <summary>
+        /// Retrieves the geometric center, outward normal, and entry surface point of the currently selected face in world coordinates.
+        /// </summary>
+        public bool GetSelectedFaceGeometry(out Vector3 faceCenterWorld, out Vector3 faceNormalWorld, out Vector3 surfacePointWorld)
+        {
+            faceCenterWorld = Vector3.zero;
+            faceNormalWorld = Vector3.up;
+            surfacePointWorld = Vector3.zero;
+
+            if (selectedObject == null || selectedObject.MeshFilter.sharedMesh == null)
+                return false;
+
+            Mesh mesh = selectedObject.MeshFilter.sharedMesh;
+            Transform trans = selectedObject.transform;
+            int[] tris = mesh.triangles;
+            Vector3[] verts = mesh.vertices;
+
+            int triIdx = selectedFaceTriangleIndex;
+            if (triIdx >= 0 && triIdx * 3 + 2 < tris.Length)
+            {
+                Vector3 w0 = trans.TransformPoint(verts[tris[triIdx * 3 + 0]]);
+                Vector3 w1 = trans.TransformPoint(verts[tris[triIdx * 3 + 1]]);
+                Vector3 w2 = trans.TransformPoint(verts[tris[triIdx * 3 + 2]]);
+
+                faceCenterWorld = (w0 + w1 + w2) / 3f;
+                Vector3 cross = Vector3.Cross(w1 - w0, w2 - w0);
+                faceNormalWorld = cross.sqrMagnitude > 1e-8f ? cross.normalized : trans.up;
+
+                if (lastHit.HasValue && lastHit.Value.collider != null && lastHit.Value.triangleIndex == triIdx)
+                {
+                    surfacePointWorld = lastHit.Value.point;
+                }
+                else
+                {
+                    surfacePointWorld = faceCenterWorld;
+                }
+                return true;
+            }
+
+            // Fallback for object mode: top face center and object up direction
+            Bounds b = mesh.bounds;
+            Vector3 topLocal = b.center + Vector3.up * b.extents.y;
+            surfacePointWorld = trans.TransformPoint(topLocal);
+            faceCenterWorld = surfacePointWorld;
+            faceNormalWorld = trans.up;
+            return true;
         }
 
         private float DistancePointToSegment(Vector3 p, Vector3 a, Vector3 b)

@@ -25,7 +25,7 @@ namespace VRCAD.UI
 
             if (leftHandAnchor == null)
             {
-                var leftController = GameObject.Find("LeftHand Controller");
+                var leftController = GameObject.Find("Left Controller") ?? GameObject.Find("LeftHand Controller");
                 if (leftController != null) leftHandAnchor = leftController.transform;
             }
 
@@ -52,6 +52,7 @@ namespace VRCAD.UI
             canvasGroup.alpha = 0f;
 
             uiObj.AddComponent<GraphicRaycaster>();
+            uiObj.AddComponent<UnityEngine.XR.Interaction.Toolkit.UI.TrackedDeviceGraphicRaycaster>();
             
             // Background
             GameObject bgObj = new GameObject("Background");
