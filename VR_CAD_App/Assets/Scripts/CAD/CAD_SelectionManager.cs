@@ -58,6 +58,7 @@ namespace VRCAD.Core
             if (CADManagerHub.Instance != null)
             {
                 CADManagerHub.Instance.ShapeDeleted += OnShapeDeleted;
+                CADManagerHub.Instance.MeshModified += OnMeshModified;
             }
         }
 
@@ -82,6 +83,7 @@ namespace VRCAD.Core
             if (CADManagerHub.Instance != null)
             {
                 CADManagerHub.Instance.ShapeDeleted -= OnShapeDeleted;
+                CADManagerHub.Instance.MeshModified -= OnMeshModified;
             }
         }
 
@@ -90,6 +92,15 @@ namespace VRCAD.Core
             if (selectedObject != null && selectedObject == obj)
             {
                 ClearSelection();
+            }
+        }
+
+        private void OnMeshModified(CADObject obj)
+        {
+            if (selectedObject != null && selectedObject == obj)
+            {
+                // Mesh topology changed; clear stale sub-selection indices, hits, and visualizers
+                ClearSubSelection();
             }
         }
 
@@ -334,6 +345,20 @@ namespace VRCAD.Core
             if (faceHighlightRenderer != null) faceHighlightRenderer.enabled = false;
             if (edgeHighlightRenderer != null) edgeHighlightRenderer.enabled = false;
             if (vertexHighlightSphere != null) vertexHighlightSphere.SetActive(false);
+        }
+
+        public void ClearSubSelection()
+        {
+            selectedFaceTriangleIndex = -1;
+            selectedVertexIndex = -1;
+            selectedEdge = (-1, -1);
+            lastHit = null;
+            HideVisualHelpers();
+            if (selectedObject != null)
+            {
+                selectedObject.ClearSubSelections();
+            }
+            CADManagerHub.Instance?.OnSelectionUpdated(selectedObject);
         }
 
         public void ClearSelection()

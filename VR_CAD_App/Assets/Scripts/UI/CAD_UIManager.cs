@@ -1269,8 +1269,8 @@ namespace VRCAD.UI
                 () => CADManagerHub.Instance?.PerformUnion(),
                 () => CADManagerHub.Instance?.PerformCombine(),
                 () => CADManagerHub.Instance?.PerformIntersect(),
-                () => CADManagerHub.Instance?.CutHoleInSelection(holeRadius, holeDepth, HoleType.Through),
-                () => CADManagerHub.Instance?.CutHoleInSelection(holeRadius, holeDepth, HoleType.Blind),
+                () => CADManagerHub.Instance?.CutHoleInSelection(holeRadius, holeDepth, HoleType.Through, "OperationsPanel_THRU"),
+                () => CADManagerHub.Instance?.CutHoleInSelection(holeRadius, holeDepth, HoleType.Blind, "OperationsPanel_BLND"),
             };
 
             float btnW = 54f;
@@ -1325,7 +1325,7 @@ namespace VRCAD.UI
             float execY = -135f;
             CreateStyledButton("Btn_ApplyHole", card.transform, new Vector2(0, execY), new Vector2(size.x - 22f, 26f),
                 "<size=9.5><b>Cut Hole In Face</b></size>", colBlueAction, colCyanGlow * 0.8f,
-                () => CADManagerHub.Instance?.CutHoleInSelection(holeRadius, holeDepth, activeHoleType));
+                () => CADManagerHub.Instance?.CutHoleInSelection(holeRadius, holeDepth, activeHoleType, "HoleParameters_CutHoleInFace"));
         }
 
         // ─── 6. SELECTION CARD (No dead space, active target stats) ───

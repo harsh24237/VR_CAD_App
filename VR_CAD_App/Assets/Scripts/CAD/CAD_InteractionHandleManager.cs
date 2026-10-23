@@ -85,6 +85,7 @@ namespace VRCAD.Core
             handleObj.name = $"InteractionHandle_{nameSuffix}";
             handleObj.transform.position = worldPos;
             handleObj.transform.localScale = Vector3.one * 0.015f; 
+            handleObj.layer = 2; // Layer 2 is 'Ignore Raycast' in Unity, ensuring interaction handles do not intercept selection raycasts
             
             Destroy(handleObj.GetComponent<Collider>());
             SphereCollider col = handleObj.AddComponent<SphereCollider>();
@@ -177,115 +178,49 @@ namespace VRCAD.Core
 
         private void SpawnVertexHandles(CADObject target, Mesh mesh)
         {
-            float tolerance = 0.005f;
-            List<Vector3> uniqueVerts = new List<Vector3>();
+            // Only spawn handle for the actively selected vertex
+            int vIdx = target.SelectedVertexIndex;
+            if (vIdx < 0 || vIdx >= mesh.vertices.Length) return;
 
-            for (int i = 0; i < mesh.vertices.Length; i++)
-            {
-                Vector3 pos = mesh.vertices[i];
-                bool found = false;
-                foreach (var v in uniqueVerts)
-                {
-                    if (Vector3.Distance(v, pos) < tolerance)
-                    {
-                        found = true;
-                        break;
-                    }
-                }
-                
-                if (!found)
-                {
-                    uniqueVerts.Add(pos);
-                    Vector3 worldPos = target.transform.TransformPoint(pos);
-                    var handle = CreateHandle(worldPos, $"Vertex_{i}");
-                    handle.InitializeForVertex(target, i);
-                }
-            }
+            Vector3 pos = mesh.vertices[vIdx];
+            Vector3 worldPos = target.transform.TransformPoint(pos);
+            var handle = CreateHandle(worldPos, $"Vertex_{vIdx}");
+            handle.InitializeForVertex(target, vIdx);
         }
 
         private void SpawnEdgeHandles(CADObject target, Mesh mesh)
         {
-            float tolerance = 0.005f;
-            int[] tris = mesh.triangles;
-            Vector3[] verts = mesh.vertices;
-            
-            // To find unique physical edges, we compare the middle point of the edges
-            List<Vector3> uniqueMidpoints = new List<Vector3>();
+            // Only spawn handle for the actively selected edge
+            var edge = target.SelectedEdge;
+            if (edge.v1 < 0 || edge.v2 < 0 || edge.v1 >= mesh.vertices.Length || edge.v2 >= mesh.vertices.Length) return;
 
-            for (int i = 0; i < tris.Length; i += 3)
-            {
-                int[] edgeIndices = { 0, 1, 1, 2, 2, 0 };
-                for (int e = 0; e < 3; e++)
-                {
-                    int v1 = tris[i + edgeIndices[e * 2]];
-                    int v2 = tris[i + edgeIndices[e * 2 + 1]];
-                    
-                    Vector3 p1 = verts[v1];
-                    Vector3 p2 = verts[v2];
-                    Vector3 mid = (p1 + p2) * 0.5f;
+            Vector3 p1 = mesh.vertices[edge.v1];
+            Vector3 p2 = mesh.vertices[edge.v2];
+            Vector3 mid = (p1 + p2) * 0.5f;
 
-                    bool found = false;
-                    foreach (var uniqueMid in uniqueMidpoints)
-                    {
-                        if (Vector3.Distance(uniqueMid, mid) < tolerance)
-                        {
-                            found = true;
-                            break;
-                        }
-                    }
-
-                    if (!found)
-                    {
-                        uniqueMidpoints.Add(mid);
-                        Vector3 worldPos = target.transform.TransformPoint(mid);
-                        var handle = CreateHandle(worldPos, $"Edge_{v1}_{v2}");
-                        handle.InitializeForEdge(target, v1, v2);
-                        
-                        // Stretch edge handle slightly to look like a capsule/bar if desired
-                        // handle.transform.localScale = new Vector3(0.01f, 0.01f, Vector3.Distance(p1, p2));
-                    }
-                }
-            }
+            Vector3 worldPos = target.transform.TransformPoint(mid);
+            var handle = CreateHandle(worldPos, $"Edge_{edge.v1}_{edge.v2}");
+            handle.InitializeForEdge(target, edge.v1, edge.v2);
         }
 
         private void SpawnFaceHandles(CADObject target, Mesh mesh)
         {
-            float tolerance = 0.005f;
+            // Only spawn a single handle for the actively selected face
+            int faceIdx = target.SelectedFaceIndex;
+            if (faceIdx < 0) return;
+
             int[] tris = mesh.triangles;
             Vector3[] verts = mesh.vertices;
-            
-            List<Vector3> uniqueCenters = new List<Vector3>();
+            if (faceIdx * 3 + 2 >= tris.Length) return;
 
-            // Assume each triangle is a part of a face. We can group by normal and coplanarity, 
-            // but for simplicity, we group by the exact center of the face polygon.
-            // On primitives, triangles often share a face. Let's spawn one handle per triangle 
-            // unless its center is extremely close to another.
-            
-            for (int i = 0; i < tris.Length; i += 3)
-            {
-                Vector3 p0 = verts[tris[i]];
-                Vector3 p1 = verts[tris[i+1]];
-                Vector3 p2 = verts[tris[i+2]];
-                Vector3 center = (p0 + p1 + p2) / 3f;
+            Vector3 p0 = verts[tris[faceIdx * 3]];
+            Vector3 p1 = verts[tris[faceIdx * 3 + 1]];
+            Vector3 p2 = verts[tris[faceIdx * 3 + 2]];
+            Vector3 center = (p0 + p1 + p2) / 3f;
 
-                bool found = false;
-                foreach (var uniqueCenter in uniqueCenters)
-                {
-                    if (Vector3.Distance(uniqueCenter, center) < tolerance)
-                    {
-                        found = true;
-                        break;
-                    }
-                }
-
-                if (!found)
-                {
-                    uniqueCenters.Add(center);
-                    Vector3 worldPos = target.transform.TransformPoint(center);
-                    var handle = CreateHandle(worldPos, $"Face_{i / 3}");
-                    handle.InitializeForFace(target, i / 3);
-                }
-            }
+            Vector3 worldPos = target.transform.TransformPoint(center);
+            var handle = CreateHandle(worldPos, $"Face_{faceIdx}");
+            handle.InitializeForFace(target, faceIdx);
         }
     }
 }

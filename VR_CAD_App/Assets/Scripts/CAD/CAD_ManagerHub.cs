@@ -203,7 +203,7 @@ namespace VRCAD.Core
             return success;
         }
 
-        public bool CutHoleInSelection(float radius = 0.03f, float depth = 0.25f, HoleType holeType = HoleType.Through)
+        public bool CutHoleInSelection(float radius = 0.03f, float depth = 0.25f, HoleType holeType = HoleType.Through, string sourceUI = "Unknown")
         {
             CADObject selected = selectionManager.SelectedObject;
             if (selected == null)
@@ -212,7 +212,8 @@ namespace VRCAD.Core
                 return false;
             }
 
-            if (selectionManager.SelectedFaceTriangleIndex < 0)
+            int selectedTriIdx = selectionManager.SelectedFaceTriangleIndex;
+            if (selectedTriIdx < 0)
             {
                 EmitStatus("Hole cutting requires a selected face. Switch to Face selection mode and click a face.");
                 return false;
@@ -250,7 +251,35 @@ namespace VRCAD.Core
             };
 
             Mesh beforeMesh = UnityEngine.Object.Instantiate(selected.MeshFilter.sharedMesh);
+            int targetTriCount = (beforeMesh != null && beforeMesh.triangles != null) ? beforeMesh.triangles.Length / 3 : 0;
+
             BooleanResult result = booleanManager.CutHoleAdvanced(selected, surfacePoint, faceNormal, options);
+
+            // Compute cylinder geometry for diagnostic reporting
+            float overcut = Mathf.Max(options.overcutMargin, 0.002f);
+            Vector3 cutDirection = -faceNormal.normalized;
+            float thickness = (beforeMesh != null) ? Mathf.Max(beforeMesh.bounds.size.x, Mathf.Max(beforeMesh.bounds.size.y, beforeMesh.bounds.size.z)) * selected.transform.localScale.x : 0.2f;
+            float cylinderLength = (holeType == HoleType.Through) ? (thickness + 2f * overcut) : (depth + overcut);
+            Vector3 cylinderCenter = (holeType == HoleType.Through) ? (surfacePoint + cutDirection * (thickness * 0.5f)) : (surfacePoint + cutDirection * ((depth - overcut) * 0.5f));
+
+            // Stage 1 Diagnostic Logging
+            var sbDiag = new System.Text.StringBuilder();
+            sbDiag.AppendLine("=== [HOLE_OP_DIAGNOSTIC] ===");
+            sbDiag.AppendLine($"UI Initiator: {sourceUI}");
+            sbDiag.AppendLine($"HoleType: {holeType}, Radius: {radius * 1000f:F1}mm, Depth: {depth * 1000f:F1}mm");
+            sbDiag.AppendLine($"Target Object: {selected.name}, Pos: {selected.transform.position:F4}, Rot: {selected.transform.rotation.eulerAngles:F1}, Scale: {selected.transform.localScale:F4}");
+            sbDiag.AppendLine($"Target Mesh Triangles: {targetTriCount}");
+            sbDiag.AppendLine($"SelectedFaceTriangleIndex: {selectedTriIdx}");
+            sbDiag.AppendLine($"Selected Raycast Hit Point: {surfacePoint:F4}");
+            sbDiag.AppendLine($"Face Normal: {faceNormal:F4}");
+            sbDiag.AppendLine($"Computed Cylinder Center: {cylinderCenter:F4}, Length: {cylinderLength * 1000f:F1}mm");
+            sbDiag.AppendLine($"BooleanResult Status: {result.status}");
+            sbDiag.AppendLine($"Validation isValid: {result.validation.isValid}, Message: {result.message}");
+            if (!result.validation.isValid)
+            {
+                sbDiag.AppendLine($"Validation Errors: openEdges={result.validation.openEdgeCount}, nonManifoldEdges={result.validation.nonManifoldEdgeCount}, degenerateTris={result.validation.degenerateTriangleCount}, duplicateTris={result.validation.duplicateTriangleCount}, tJunctions={result.validation.tJunctionCount}");
+            }
+            Debug.Log(sbDiag.ToString());
 
             if (result.status == BooleanResultStatus.Success)
             {

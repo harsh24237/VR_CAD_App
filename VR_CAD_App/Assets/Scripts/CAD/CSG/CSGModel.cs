@@ -224,7 +224,6 @@ namespace VRCAD.Core.CSG
             if (polyList == null || polyList.Count < 2) return;
 
             float epsSqr = CSGTolerance.DistanceEpsilonSqr;
-            float planeEps = CSGTolerance.PlaneEpsilon;
 
             // 1. Collect all distinct vertex positions from all polygons
             var candidatePoints = new List<Vector3>();
@@ -486,14 +485,49 @@ namespace VRCAD.Core.CSG
                 if (cleanVerts.Count < 3) continue;
 
                 // 2. Register vertices through collision-safe welding
-                int[] polyIndices = new int[cleanVerts.Count];
+                var rawIndices = new List<int>(cleanVerts.Count);
                 for (int i = 0; i < cleanVerts.Count; i++)
                 {
-                    polyIndices[i] = FindOrAddVertex(cleanVerts[i]);
+                    rawIndices.Add(FindOrAddVertex(cleanVerts[i]));
                 }
 
-                // 3. Triangulate planar convex polygon using optimal-anchor fan, or centroid fan if edges are split
-                int n = cleanVerts.Count;
+                // Clean rawIndices: remove consecutive duplicates and backtracking spikes (A -> B -> A)
+                bool modified = true;
+                while (modified && rawIndices.Count >= 3)
+                {
+                    modified = false;
+                    // Remove consecutive duplicates (including loop closure)
+                    for (int i = 0; i < rawIndices.Count; i++)
+                    {
+                        int next = rawIndices[(i + 1) % rawIndices.Count];
+                        if (rawIndices[i] == next)
+                        {
+                            rawIndices.RemoveAt((i + 1) % rawIndices.Count);
+                            modified = true;
+                            break;
+                        }
+                    }
+                    if (modified) continue;
+
+                    // Remove backtracking spikes (A -> B -> A)
+                    for (int i = 0; i < rawIndices.Count; i++)
+                    {
+                        int prev = rawIndices[(i - 1 + rawIndices.Count) % rawIndices.Count];
+                        int next = rawIndices[(i + 1) % rawIndices.Count];
+                        if (prev == next)
+                        {
+                            rawIndices.RemoveAt(i);
+                            modified = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (rawIndices.Count < 3) continue;
+                int[] polyIndices = rawIndices.ToArray();
+
+                // 3. Triangulate planar polygon using optimal-anchor fan, or ear-clipping if edges are split
+                int n = polyIndices.Length;
                 if (n == 3)
                 {
                     int i0 = polyIndices[0];
@@ -562,38 +596,155 @@ namespace VRCAD.Core.CSG
                 }
                 else
                 {
-                    // If no perimeter anchor provides non-degenerate triangles (e.g. collinear split vertices on edges),
-                    // triangulate using a centroid fan to guarantee positive area for all perimeter segments without skipping edges.
-                    Vector3 centerPos = Vector3.zero;
-                    Vector2 centerUV = Vector2.zero;
+                    // Planar ear-clipping triangulation for n-gons with collinear split edges or concavities.
+                    // Connects existing vertices without inserting phantom centroid vertices or flipping inverted fan triangles.
+                    Vector3 normPlane = poly.plane.normal.normalized;
+                    Vector3 uAxis = Mathf.Abs(normPlane.x) > 0.9f
+                        ? Vector3.Cross(normPlane, Vector3.up).normalized
+                        : Vector3.Cross(normPlane, Vector3.right).normalized;
+                    Vector3 vAxis = Vector3.Cross(normPlane, uAxis).normalized;
+
+                    var p2D = new Vector2[n];
                     for (int i = 0; i < n; i++)
                     {
-                        centerPos += outPositions[polyIndices[i]];
-                        centerUV += outUVs[polyIndices[i]];
+                        Vector3 pos = outPositions[polyIndices[i]];
+                        p2D[i] = new Vector2(Vector3.Dot(pos, uAxis), Vector3.Dot(pos, vAxis));
                     }
-                    centerPos /= n;
-                    centerUV /= n;
 
-                    int centerIdx = FindOrAddVertex(new CSGVertex(centerPos, poly.plane.normal, centerUV));
-
+                    // Compute 2D signed area to ensure counter-clockwise order relative to (uAxis, vAxis)
+                    float signedArea = 0f;
                     for (int i = 0; i < n; i++)
                     {
-                        int idx1 = polyIndices[i];
-                        int idx2 = polyIndices[(i + 1) % n];
-                        if (idx1 == idx2 || idx1 == centerIdx || idx2 == centerIdx) continue;
+                        Vector2 a = p2D[i];
+                        Vector2 b = p2D[(i + 1) % n];
+                        signedArea += (a.x * b.y - b.x * a.y);
+                    }
 
-                        Vector3 e1 = outPositions[idx1] - outPositions[centerIdx];
-                        Vector3 e2 = outPositions[idx2] - outPositions[centerIdx];
-                        Vector3 normal = Vector3.Cross(e1, e2);
-                        if (normal.sqrMagnitude < areaThresholdSqr) continue;
+                    var vList = new List<int>(n);
+                    if (signedArea >= 0f)
+                    {
+                        for (int i = 0; i < n; i++) vList.Add(i);
+                    }
+                    else
+                    {
+                        for (int i = n - 1; i >= 0; i--) vList.Add(i);
+                    }
 
-                        if (Vector3.Dot(normal, poly.plane.normal) > 0f)
+                    int maxIterations = n * 4;
+                    int iter = 0;
+                    float areaThreshold = CSGTolerance.TriangleAreaEpsilon * 2f;
+
+                    while (vList.Count > 3 && iter++ < maxIterations)
+                    {
+                        int count = vList.Count;
+                        int bestEarIndex = -1;
+                        float bestEarCross = 0f;
+
+                        for (int i = 0; i < count; i++)
                         {
-                            EmitTriangle(centerIdx, idx1, idx2);
+                            int prevIdx = vList[(i - 1 + count) % count];
+                            int curIdx = vList[i];
+                            int nextIdx = vList[(i + 1) % count];
+
+                            Vector2 a = p2D[prevIdx];
+                            Vector2 b = p2D[curIdx];
+                            Vector2 c = p2D[nextIdx];
+
+                            float cross = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+                            if (cross <= areaThreshold) continue;
+
+                            bool containsOther = false;
+                            for (int j = 0; j < count; j++)
+                            {
+                                int testIdx = vList[j];
+                                if (testIdx == prevIdx || testIdx == curIdx || testIdx == nextIdx) continue;
+                                Vector2 testPt = p2D[testIdx];
+                                if (PointInTriangleOrOnDiagonal2D(testPt, a, b, c))
+                                {
+                                    containsOther = true;
+                                    break;
+                                }
+                            }
+
+                            if (!containsOther)
+                            {
+                                if (cross > bestEarCross)
+                                {
+                                    bestEarCross = cross;
+                                    bestEarIndex = i;
+                                }
+                            }
+                        }
+
+                        if (bestEarIndex >= 0)
+                        {
+                            int prevIdx = vList[(bestEarIndex - 1 + count) % count];
+                            int curIdx = vList[bestEarIndex];
+                            int nextIdx = vList[(bestEarIndex + 1) % count];
+
+                            int idx0 = polyIndices[prevIdx];
+                            int idx1 = polyIndices[curIdx];
+                            int idx2 = polyIndices[nextIdx];
+
+                            Vector3 norm = Vector3.Cross(outPositions[idx1] - outPositions[idx0], outPositions[idx2] - outPositions[idx0]);
+                            if (Vector3.Dot(norm, normPlane) > 0f) EmitTriangle(idx0, idx1, idx2);
+                            else EmitTriangle(idx0, idx2, idx1);
+
+                            vList.RemoveAt(bestEarIndex);
                         }
                         else
                         {
-                            EmitTriangle(centerIdx, idx2, idx1);
+                            // Numerical fallback: pick the vertex with largest positive cross product
+                            int fallbackIndex = -1;
+                            float maxCross = 0f;
+                            for (int i = 0; i < count; i++)
+                            {
+                                int prevIdx = vList[(i - 1 + count) % count];
+                                int curIdx = vList[i];
+                                int nextIdx = vList[(i + 1) % count];
+                                float cross = (p2D[curIdx].x - p2D[prevIdx].x) * (p2D[nextIdx].y - p2D[curIdx].y) -
+                                              (p2D[curIdx].y - p2D[prevIdx].y) * (p2D[nextIdx].x - p2D[curIdx].x);
+                                if (cross > maxCross)
+                                {
+                                    maxCross = cross;
+                                    fallbackIndex = i;
+                                }
+                            }
+
+                            if (fallbackIndex >= 0)
+                            {
+                                int prevIdx = vList[(fallbackIndex - 1 + count) % count];
+                                int curIdx = vList[fallbackIndex];
+                                int nextIdx = vList[(fallbackIndex + 1) % count];
+
+                                int idx0 = polyIndices[prevIdx];
+                                int idx1 = polyIndices[curIdx];
+                                int idx2 = polyIndices[nextIdx];
+
+                                Vector3 norm = Vector3.Cross(outPositions[idx1] - outPositions[idx0], outPositions[idx2] - outPositions[idx0]);
+                                if (Vector3.Dot(norm, normPlane) > 0f) EmitTriangle(idx0, idx1, idx2);
+                                else EmitTriangle(idx0, idx2, idx1);
+
+                                vList.RemoveAt(fallbackIndex);
+                            }
+                            else
+                            {
+                                break;
+                            }
+                        }
+                    }
+
+                    if (vList.Count == 3)
+                    {
+                        int idx0 = polyIndices[vList[0]];
+                        int idx1 = polyIndices[vList[1]];
+                        int idx2 = polyIndices[vList[2]];
+
+                        Vector3 norm = Vector3.Cross(outPositions[idx1] - outPositions[idx0], outPositions[idx2] - outPositions[idx0]);
+                        if (norm.sqrMagnitude >= CSGTolerance.TriangleAreaEpsilon * CSGTolerance.TriangleAreaEpsilon * 4f)
+                        {
+                            if (Vector3.Dot(norm, normPlane) > 0f) EmitTriangle(idx0, idx1, idx2);
+                            else EmitTriangle(idx0, idx2, idx1);
                         }
                     }
                 }
@@ -619,6 +770,26 @@ namespace VRCAD.Core.CSG
             mesh.RecalculateTangents();
 
             return mesh;
+        }
+
+        private static bool PointInTriangleOrOnDiagonal2D(Vector2 p, Vector2 a, Vector2 b, Vector2 c)
+        {
+            float c1 = (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
+            float c2 = (c.x - b.x) * (p.y - b.y) - (c.y - b.y) * (p.x - b.x);
+            float c3 = (a.x - c.x) * (p.y - c.y) - (a.y - c.y) * (p.x - c.x);
+
+            // Strictly inside the counter-clockwise triangle
+            if (c1 > 1e-7f && c2 > 1e-7f && c3 > 1e-7f) return true;
+
+            // Collinear with diagonal (c, a) and between c and a
+            if (Mathf.Abs(c3) <= 1e-7f && c1 > 1e-7f && c2 > 1e-7f)
+            {
+                float dot = (p.x - a.x) * (c.x - a.x) + (p.y - a.y) * (c.y - a.y);
+                float lenSqr = (c - a).sqrMagnitude;
+                if (dot > 1e-7f && dot < lenSqr - 1e-7f) return true;
+            }
+
+            return false;
         }
 
         #endregion

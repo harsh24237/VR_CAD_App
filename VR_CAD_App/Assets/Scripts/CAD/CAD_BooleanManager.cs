@@ -353,22 +353,19 @@ namespace VRCAD.Core
 
             float minProj = float.MaxValue;
             float maxProj = float.MinValue;
-
-            Vector3 cutDirLocal = transform.InverseTransformDirection(cutDirWorld).normalized;
-            Vector3 entryLocal = transform.InverseTransformPoint(entryPointWorld);
-
-            float entryProj = Vector3.Dot(entryLocal, cutDirLocal);
+            Vector3 normCutDir = cutDirWorld.normalized;
 
             for (int i = 0; i < verts.Length; i++)
             {
-                float proj = Vector3.Dot(verts[i], cutDirLocal);
+                Vector3 worldPos = transform.TransformPoint(verts[i]);
+                float proj = Vector3.Dot(worldPos, normCutDir);
                 if (proj < minProj) minProj = proj;
                 if (proj > maxProj) maxProj = proj;
             }
 
-            // Thickness is the positive forward span from entry along cut direction
+            // Physical extent along the cut axis in world units
             float extent = maxProj - minProj;
-            return Mathf.Max(extent, 0.05f);
+            return Mathf.Max(extent, 0.005f);
         }
 
         /// <summary>
